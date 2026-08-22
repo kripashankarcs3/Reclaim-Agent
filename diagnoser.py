@@ -34,10 +34,27 @@ def classify(txn) -> str:
     return "hard"
 
 
+def _is_placeholder(value: str) -> bool:
+    """.env.example ke dummy values (sk-xxxx-xxxx / rzp_test_xxxxxxxx) ko unset maano."""
+    v = (value or "").strip().lower()
+    return (not v) or ("xxxx" in v) or v.endswith("_here") or v in ("changeme", "todo")
+
+
 def explain(txn, label: str) -> str:
-    """Human-readable reason. LLM optional; fallback template offline chalta hai."""
+    """
+    Human-readable reason. LLM OPT-IN hai; default offline template.
+
+    Kyun opt-in: Phase 4 mein executor load_dotenv() call karta hai, jisse .env
+    ka LLM_API_KEY poore process ke env mein aa jata hai. Agar hum sirf
+    "key hai?" pe LLM chala dete, to `python run_batch.py` chupchap 54 network
+    call maar deta (measured: 0.3s -> 59s) — aur INVARIANT #5 (demo kabhi live
+    call pe stall na ho) toot jata. Isliye LLM tabhi jab user ne explicitly
+    bola ho:  RECLAIM_LLM_EXPLAIN=1  (PowerShell: $env:RECLAIM_LLM_EXPLAIN=1)
+    """
+    if os.getenv("RECLAIM_LLM_EXPLAIN", "").strip() not in ("1", "true", "yes"):
+        return _explain_template(txn, label)
     key = os.getenv("LLM_API_KEY")
-    if key:
+    if key and not _is_placeholder(key):
         try:
             return _explain_llm(txn, label, key)
         except Exception:

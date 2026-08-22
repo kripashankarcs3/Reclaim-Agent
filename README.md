@@ -40,6 +40,14 @@ python run_batch.py --show-timeline txn_046   # the 3-rule gate block (star case
 python run_batch.py --show-notifications      # print every mocked TRAI template
 ```
 
+Optional live mode (needs `pip install razorpay` + `rzp_test_` keys in `.env`):
+```bash
+python executor.py --ping              # read-only payment.all(); creates nothing
+python run_batch.py --live             # ONE real test-mode payment link, rest simulated
+python run_batch.py --live --live-limit 0   # all 33 links real (slow; not for the demo)
+```
+Without `--live` the spine makes **zero network calls** and needs no keys at all.
+
 **The star case — txn_046** (Rs.25,000, subscription, `insufficient_funds`, mandate
 already re-presented 3x). The agent *proposes the retry*; the gate stacks three
 refusals on it and routes it to a human:
@@ -110,12 +118,47 @@ link and the nudge are two proposals with two independent gate checks — which 
   re-charge a one-time payment with no mandate either. Fixing this would move the
   headline number, so it is called out rather than quietly patched.
 - Synthetic 54-txn batch drives deterministic outcomes so the demo never stalls.
-- **UPI Payment Links are live-mode only**; demo uses test-mode-supported primitives.
-- Executor is dry-run in the spine; real Razorpay SDK wiring is in `executor.py` TODOs.
+
+### What the LIVE Razorpay calls actually returned (Phase 4, measured — not claimed)
+- **Standard Payment Links DO work in test mode.** Verified end to end: `payment_link
+  .create` returned a real, openable `short_url`, and `payment_link.fetch(id)` confirms
+  it server-side (`plink_TSltLVDkNcwer9` -> `https://rzp.io/rzp/Angyk9m`, amount 99900
+  paise = Rs.999, matching txn_016).
+- **UPI Payment Links are live-mode only — we did NOT test them and do not fake them.**
+  The demo is built on standard links precisely because they are the test-mode-supported
+  primitive. No UPI-link code path exists in this repo.
+- **Nothing is ever sent, verified server-side.** The created link comes back with
+  `notify: {email: False, sms: False, whatsapp: False}` and `reminder_enable: False`.
+  Razorpay would happily SMS/email the customer if those defaulted on — so the executor
+  sets them explicitly. (It also exposes a `whatsapp` channel the docs' two-field
+  example omits; it defaults off.)
+- **`payment.all()` returns 0 payments.** The test account has no payment history, so
+  none of the batch is drawn from live data — all 54 transactions are synthetic. A
+  payment link is not a payment until somebody pays it.
+- **`payment_link.all()` is not reliable here** — it returned an empty list despite
+  confirmed creations, then `BadRequestError: Too many requests`. `fetch(id)` is the
+  verification path we actually trust.
+- **Retries are simulated even under `--live`.** Only payment links are real; we never
+  fire an actual recurring debit. Deliberate scope, not an oversight.
+- **`--live` creates ONE real link by default** (`--live-limit 1`, `0` = all 33). A
+  33-call live run would be exactly the stalling demo the invariants forbid.
+- **`reference_id` carries a run-unique timestamp suffix** because Razorpay rejects
+  duplicates — so it is not yet a stable idempotency key. Real idempotency arrives in
+  Phase 5 via the webhook's `x-razorpay-event-id`.
+- **Live failures degrade to `human_review`, never to a fake link.** Any executor
+  exception is audited as `EXECUTOR_ERROR` and the case is routed to a human.
+- **The executor refuses `rzp_live_` keys outright.** This agent structurally cannot run
+  against a live account.
+- **LLM explanations are opt-in** (`RECLAIM_LLM_EXPLAIN=1`). Phase 4 introduced
+  `load_dotenv()`, which put `LLM_API_KEY` into the process env and silently
+  turned the offline batch into 54 network calls (measured: 0.25s -> 59s) with output
+  unchanged. Gating the LLM behind an explicit flag restores the deterministic,
+  zero-network default.
 
 ## Build order (what's done vs next)
 Done (runnable spine): DB models · 54-txn seed w/ ground truth · **policy engine** ·
 diagnoser · decider · audit log · metrics · batch harness · mocked notifications ·
-**gate-produced refusals + two-step compliant escalation + separately-gated nudges**.
-Next: wire `executor.py` to Razorpay test APIs · `main.py` webhook (verify + idempotency) ·
+**gate-produced refusals + two-step compliant escalation + separately-gated nudges** ·
+**real Razorpay test-mode executor behind a `dry_run` seam (`--live`)**.
+Next: `main.py` webhook (verify + idempotency) ·
 `agent.py` LangGraph loop · React dashboard (audit timeline = the star panel).

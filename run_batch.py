@@ -29,30 +29,20 @@ from audit import AuditLog
 import metrics
 
 
-def execute_dry_run(action, txn):
+def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
     """
-    Phase 4 mein ye executor ke REAL razorpay calls karega. Abhi executor ke
-    dry-run stubs — outcome deterministically simulate hota hai.
-    Returns: (outcome, link_dict_or_None)
+    demo_hour: 'current time' force karne ke liye (window rule demo).
+    live:      payment_link actions REAL Razorpay test-mode API se banao.
+               (Retries phir bhi simulated — executor.py rail #3 dekho.)
+    live_limit: max kitne real link banayenge (0 = unlimited). Demo ko fast
+               rakhne ke liye — invariant: live call pe demo stall nahi hona chahiye.
     """
-    if action == "retry":
-        executor.retry_charge(txn)
-        # Soft declines mostly recover on retry (deterministic by id parity)
-        outcome = "recovered" if int(txn.id.split("_")[1]) % 3 != 0 else "pending"
-        return outcome, None
-    if action in ("payment_link", "recovery_link"):
-        link = executor.create_payment_link(txn)   # link banana = koi contact NAHI
-        return "pending", link                     # customer action pending
-    return "not_attempted", None
-
-
-def run(demo_hour=14, show_notifications=False):
-    """demo_hour: 'current time' force karne ke liye (window rule demo)."""
     now = datetime.now().replace(hour=demo_hour, minute=30)
     batch = seed.generate()
     log = AuditLog()
     customer_attempts = {}   # spend-cap tracking
     results = []
+    live_created = 0         # kitne REAL link ban chuke
 
     for txn in batch:
         cid = txn.customer_id
@@ -75,6 +65,32 @@ def run(demo_hour=14, show_notifications=False):
             s["attempts_today"] = customer_attempts.get(cid, 0)
             return s
 
+        def do_execute(act):
+            """
+            Single execution seam — sab kuch executor.py se hokar jata hai.
+            Returns (outcome, artifact, error_or_None).
+
+            Live call fail hui to hum MOCK par fallback NAHI karte: error audit
+            mein jata hai aur case human_review banta hai. Fake link kabhi nahi.
+            """
+            nonlocal live_created
+            use_live = (live and act in ("payment_link", "recovery_link")
+                        and (live_limit == 0 or live_created < live_limit))
+            try:
+                oc, art = executor.execute(act, txn, dry_run=not use_live)
+            except Exception as e:
+                err = f"EXECUTOR_ERROR: {type(e).__name__}: {e}"
+                log.log(txn.id, "execute_error",
+                        {"action": act, "live": use_live, "error": err})
+                return "human_review", None, err
+            if art is not None and art.get("live"):
+                live_created += 1
+                print(f"  [LIVE] {txn.id}: payment link created -> {art['short_url']}")
+            log.log(txn.id, "execute",
+                    {"action": act, "outcome": oc,
+                     "live": bool(art and art.get("live")), "artifact": art})
+            return oc, art, None
+
         # 4) POLICY GATE (the star) — refusal SIRF yahan se aata hai
         verdict = policy_engine.check(proposed, txn, label, now=now,
                                       customer_state=cust_state())
@@ -94,8 +110,11 @@ def run(demo_hour=14, show_notifications=False):
             outcome = "human_review"
             gate_reasons = ["unclassified failure - no automated action proposed"]
         elif verdict["allowed"]:
-            outcome, link = execute_dry_run(proposed, txn)
-            customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+            outcome, link, exec_err = do_execute(proposed)
+            if exec_err:
+                action, gate_reasons = "human_review", [exec_err]
+            else:
+                customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
         else:
             gate_reasons = list(verdict["reasons"])
             fb = decider.fallback(proposed, verdict["failed_rules"])
@@ -108,9 +127,13 @@ def run(demo_hour=14, show_notifications=False):
                          "allowed": v2["allowed"], "failed_rules": v2["reasons"]})
                 failed_rules += list(v2["failed_rules"])
                 if v2["allowed"]:
-                    action, escalated_from = fb, proposed
-                    outcome, link = execute_dry_run(fb, txn)
-                    customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+                    outcome, link, exec_err = do_execute(fb)
+                    if exec_err:
+                        action = "human_review"
+                        gate_reasons = gate_reasons + [exec_err]
+                    else:
+                        action, escalated_from = fb, proposed
+                        customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
                 else:
                     gate_reasons += list(v2["reasons"])
                     action, outcome = "human_review", "human_review"
@@ -160,10 +183,26 @@ if __name__ == "__main__":
                     help="Print audit timeline for a txn id, e.g. txn_046")
     ap.add_argument("--show-notifications", action="store_true",
                     help="Print every mocked TRAI template as it is logged")
+    ap.add_argument("--live", action="store_true",
+                    help="Use the REAL Razorpay test-mode API for payment_link "
+                         "actions (retries stay simulated). Needs .env keys.")
+    ap.add_argument("--live-limit", type=int, default=1,
+                    help="Max real payment links to create with --live "
+                         "(default 1, 0 = no limit). Keeps the demo fast.")
     args = ap.parse_args()
 
+    if args.live:
+        # Pre-flight: keys missing / live key / SDK missing -> saaf error do,
+        # chupke se dry-run par mat gir jao.
+        ready, reason = executor.live_available()
+        if not ready:
+            raise SystemExit(f"--live refused: {reason}")
+        print(f"[LIVE MODE] real Razorpay TEST-mode payment links "
+              f"(limit={args.live_limit or 'none'}); retries stay simulated.")
+
     results, log = run(demo_hour=args.demo_hour,
-                       show_notifications=args.show_notifications)
+                       show_notifications=args.show_notifications,
+                       live=args.live, live_limit=args.live_limit)
     m = metrics.compute(results)
     metrics.print_report(m)
 
@@ -178,3 +217,16 @@ if __name__ == "__main__":
             print("\n  (Most-gated case - refusal comes from policy_engine, "
                   "not the decider:)")
             log.print_timeline(worst["txn"].id)
+
+    if args.live:
+        # payment.all() bhi wired hai — yahi fields diagnoser ka raw material hain.
+        print("\n  [LIVE] verifying payment.all() ...")
+        try:
+            items = executor.fetch_payments(count=5, dry_run=False)
+            print(f"  [LIVE] payment.all() OK — {len(items)} payment(s) visible")
+            for p in items:
+                print(f"    {p.get('id')} {str(p.get('status')):<10} "
+                      f"method={p.get('method')} error_code={p.get('error_code')}")
+        except Exception as e:
+            # Honest failure: batao, chhupao mat.
+            print(f"  [LIVE] payment.all() FAILED — {type(e).__name__}: {e}")
