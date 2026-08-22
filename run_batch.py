@@ -19,6 +19,7 @@ Run:  python run_batch.py
 import argparse
 from datetime import datetime
 
+import config
 import seed
 import diagnoser
 import decider
@@ -58,6 +59,16 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
         # 3) DECIDE (propose only — deliberately naive, see decider.py)
         proposed = decider.propose(txn, label)
         log.log(txn.id, "decide", {"proposed_action": proposed})
+
+        def count_attempt(act):
+            """
+            Spend-cap tally. Wahi definition jo rule_spend_cap use karta hai
+            (config.CONTACT_ACTIONS) — warna rule aur counter alag-alag hisaab
+            lagayenge aur cap chupke se galat ho jayega.
+            """
+            if (not config.SPEND_CAP_COUNTS_CONTACTS_ONLY
+                    or act in config.CONTACT_ACTIONS):
+                customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
 
         def cust_state():
             """Policy ke liye customer state (spend cap + TRAI consent)."""
@@ -115,7 +126,7 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
             if exec_err:
                 action, gate_reasons = "human_review", [exec_err]
             else:
-                customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+                count_attempt(proposed)
 
                 # 5b) RETRY CHALA PAR RECOVER NAHI HUA -> dead end mat chhodo.
                 # Gate ne retry allow kiya tha, attempt hua, phir bhi paisa nahi
@@ -140,7 +151,7 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                         else:
                             action, escalated_from = fb, "retry"
                             escalation_kind = "retry_failed"
-                            customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+                            count_attempt(fb)
                     else:
                         # Link bhi gated (window / spend cap / TRAI) -> human review
                         # with reasons. Chup-chaap dead end kabhi nahi.
@@ -165,7 +176,7 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                     else:
                         action, escalated_from = fb, proposed
                         escalation_kind = "gate_blocked"
-                        customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+                        count_attempt(fb)
                 else:
                     gate_reasons += list(v2["reasons"])
                     action, outcome = "human_review", "human_review"
@@ -187,7 +198,7 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                                             link["short_url"], now=now,
                                             verbose=show_notifications)
                 log.log(txn.id, "notify", record)
-                customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+                count_attempt("nudge")
                 nudge = {"status": "sent", "reasons": []}
             else:
                 log.log(txn.id, "notify",

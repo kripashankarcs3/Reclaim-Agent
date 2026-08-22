@@ -38,6 +38,32 @@ OPT_OUT_COOLDOWN_DAYS = 90
 # --- Per-customer spend / attempt cap (over-contact rokne ke liye) ------------
 MAX_RECOVERY_ATTEMPTS_PER_CUSTOMER_PER_DAY = 2
 
+# --- Cap ke liye "CONTACT" ka matlab kya hai? (policy definition) -------------
+# Ye cap kis nuksan se bacha raha hai? CUSTOMER KO BAAR-BAAR PARESHAAN KARNE se.
+# Yaani jo cheez customer ko DIKHTI hai, wahi ginni chahiye.
+#
+#   retry  -> customer ko kuch nahi dikhta. Ye ek silent backend re-presentment
+#             hai mandate ke against — na SMS, na screen, na koi awaaz. Uska
+#             apna alag, sakht cap already hai: NPCI 1+3 (rule_retry_cap).
+#             Isko contact-cap mein ginna do baar saza dena hai, aur usse ek
+#             asli nuksan hota hai: ek failed retry customer ka "contact budget"
+#             kha jata hai, jisse hum use wo link BATA hi nahi paate jo humne
+#             abhi banaya. Cap ka maqsad ulta ho jata hai.
+#
+#   payment_link / recovery_link -> customer-facing hai. Ye ek payment REQUEST
+#             hai jo customer ko address ki gayi hai (Razorpay khud isko notify
+#             kar sakta hai — hum wo off rakhte hain), aur iske saath hamesha ek
+#             nudge propose hota hai. Isliye ye ginta hai.
+#
+#   nudge  -> asli message. Definitely ginta hai.
+#
+# Note: ye Phase 3.5 wale "link banana koi contact nahi hai" se ulta NAHI hai.
+# Wahan sawaal TRAI/consent ka tha — wo MESSAGE pe lagta hai, link object pe
+# nahi. Yahan sawaal alag hai: ek din mein customer ki taraf kitni recovery
+# attempts bheji. Link ek attempt hai; silent retry nahi.
+SPEND_CAP_COUNTS_CONTACTS_ONLY = True
+CONTACT_ACTIONS = {"payment_link", "recovery_link", "nudge"}
+
 # --- Mandate requirement for silent re-presentment (Phase 3.6) ---------------
 # Ek ONE-TIME payment ko merchant chupchap dobara charge nahi kar sakta — koi
 # stored mandate/token hai hi nahi. Silent retry SIRF mandate-backed txn pe

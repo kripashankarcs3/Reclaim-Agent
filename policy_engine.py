@@ -84,9 +84,17 @@ def rule_trai_messaging(action: str, txn, customer_state: Dict) -> Tuple[bool, s
 
 
 def rule_spend_cap(action: str, txn, customer_state: Dict) -> Tuple[bool, str]:
-    """Ek customer ko din mein N se zyada recovery attempts nahi (over-contact)."""
+    """
+    Ek customer ko din mein N se zyada CONTACT nahi (over-contact guard).
+
+    Kaunse actions ginte hain ye config.CONTACT_ACTIONS decide karta hai —
+    silent retry jaan-boojh kar bahar hai (customer ko dikhta hi nahi; uska
+    apna cap NPCI 1+3 hai). Poora reasoning config.py mein likha hai.
+    """
     attempts_today = customer_state.get("attempts_today", 0)
-    if action in ("retry", "payment_link", "recovery_link", "nudge"):
+    capped = (config.CONTACT_ACTIONS if config.SPEND_CAP_COUNTS_CONTACTS_ONLY
+              else config.CONTACT_ACTIONS | {"retry"})
+    if action in capped:
         if attempts_today >= config.MAX_RECOVERY_ATTEMPTS_PER_CUSTOMER_PER_DAY:
             return False, (f"SPEND_CAP: {attempts_today} attempts today >= cap "
                            f"{config.MAX_RECOVERY_ATTEMPTS_PER_CUSTOMER_PER_DAY}")

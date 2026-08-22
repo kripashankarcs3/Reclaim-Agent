@@ -139,12 +139,19 @@ link and the nudge are two proposals with two independent gate checks — which 
   `human_review` carrying `CONTACT_WINDOW`, because a link we may not tell the customer
   about is not a route. Two escalation kinds are counted separately so the labels stay
   honest: *blocked debit -> link* (17) and *failed retry -> link* (5).
-- **The spend cap bites here, on purpose.** A failed retry consumes one recovery
-  attempt and its fallback link consumes a second, so the follow-up nudge hits the
-  2-per-customer-per-day cap and is suppressed (7 suppressed nudges, up from 2). The
-  customer therefore has a live link but is not messaged about it today. Exempting
-  retries from the cap would "fix" this number by gaming the very rule that exists to
-  prevent over-contact, so we leave it and surface the case for human review instead.
+- **"Contact" is defined in `config.py`, not assumed.** The per-customer cap exists to
+  stop us pestering a customer, so only what the customer can actually *see* counts
+  against it: a payment link (a payment request addressed to them) and a nudge (the
+  message itself). A `retry` is a silent backend re-presentment against a mandate —
+  no SMS, no screen, nothing the customer perceives — and it already has its own
+  stricter cap in NPCI 1+3, so counting it twice punished the customer-facing budget
+  for an invisible event. Concretely, it meant a failed retry could eat the budget
+  needed to tell the customer about the link we had just created, inverting the rule's
+  purpose. `SPEND_CAP_COUNTS_CONTACTS_ONLY` + `CONTACT_ACTIONS` carry that reasoning,
+  and both `rule_spend_cap` and the batch's tally read the same definition so they
+  cannot drift apart. The cap still bites where it should: `cust_repeat`'s third
+  same-day attempt is still refused (SPEND_CAP, 2 cases), and the only remaining
+  suppressed nudges are the two genuine TRAI cases (opt-out and no-consent).
 - Synthetic 54-txn batch drives deterministic outcomes so the demo never stalls.
 
 ### What the LIVE Razorpay calls actually returned (Phase 4, measured — not claimed)
