@@ -5,3 +5,10 @@ __pycache__/
 *.pyc
 *.db
 frontend/node_modules/
+
+# Internal planning / strategy docs (not for public GitHub)
+AGENTS.md
+AGENT_PROMPT.md
+ROADMAP.md
+GETTING_STARTED.md
+docs/
