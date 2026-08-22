@@ -1,5 +1,8 @@
 # Core spine (run_batch.py) needs NO external deps — pure stdlib.
-# Below are for Phase 4-5 (real Razorpay + agent + webhook + LLM):
+# Below are for Phase 4-5 (real Razorpay + agent + webhook).
+# LLM explanation is optional and provider-agnostic: it calls an HTTP
+# endpoint from .env (LLM_API_URL/LLM_MODEL/LLM_API_KEY) using stdlib
+# urllib, so no vendor SDK is required.
 fastapi
 uvicorn
 razorpay
@@ -7,7 +10,5 @@ python-dotenv
 pydantic
 sqlalchemy
 langgraph
-langchain-llm
-LLM provider
 apscheduler
 httpx

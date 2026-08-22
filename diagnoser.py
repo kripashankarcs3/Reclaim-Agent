@@ -35,7 +35,7 @@ def classify(txn) -> str:
 
 
 def _is_placeholder(value: str) -> bool:
-    """.env.example ke dummy values (sk-xxxx-xxxx / rzp_test_xxxxxxxx) ko unset maano."""
+    """.env.example ke dummy values ke dummy placeholders ko unset maano."""
     v = (value or "").strip().lower()
     return (not v) or ("xxxx" in v) or v.endswith("_here") or v in ("changeme", "todo")
 
@@ -77,20 +77,51 @@ def _explain_template(txn, label: str) -> str:
 
 
 def _explain_llm(txn, label: str, api_key: str) -> str:
-    """Phase 3+: real LLM call. Explanation ONLY — no decision."""
-    import llm_client  # razorpay's Agent Studio bhi agent SDK pe hai (on-brand)
-    client = LLMClient(api_key=api_key)
+    """
+    Optional LLM explanation. Explanation ONLY — kabhi koi decision nahi.
+
+    Provider-agnostic by design: endpoint aur model dono .env se aate hain,
+    code mein koi vendor SDK ya model hardcode nahi. Stdlib urllib use karta
+    hai taaki koi extra dependency na lage.
+        LLM_API_URL  -> messages-style chat endpoint
+        LLM_MODEL    -> model identifier
+        LLM_API_KEY  -> bearer token
+    Kuch bhi fail hua to caller deterministic template par gir jata hai.
+    """
+    import json
+    import urllib.request
+
+    url = os.getenv("LLM_API_URL", "").strip()
+    model = os.getenv("LLM_MODEL", "").strip()
+    if not url or not model:
+        raise RuntimeError("LLM_API_URL / LLM_MODEL not configured")
+
     prompt = (
         f"A payment failed. label={label}, error_code={txn.error_code}, "
         f"method={txn.method}, amount=Rs.{txn.amount}, subscription={txn.is_subscription}. "
         f"In ONE plain sentence, explain the likely root cause for a support dashboard. "
         f"Do NOT recommend an action — explanation only."
     )
-    resp = client.messages.create(
-        model="llm-model", max_tokens=120,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+    body = json.dumps({
+        "model": model, "max_tokens": 120,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode()
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "content-type": "application/json",
+        "authorization": f"Bearer {api_key}",
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode())
+
+    # Providers ke response shapes alag hote hain — dono common shapes handle
+    # kar lete hain, warna exception -> template fallback.
+    content = data.get("content")
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content).strip()
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        return (choices[0].get("message", {}).get("content") or "").strip()
+    raise RuntimeError("unrecognised LLM response shape")
 
 
 def diagnose(txn) -> Tuple[str, str]:
