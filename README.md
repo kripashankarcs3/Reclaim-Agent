@@ -68,6 +68,7 @@ refusals on it and routes it to a human:
 | ✅ Bounded / Gated | `policy_engine.py` (rules-as-code, LLM can't override) |
 | ✅ Compliant escalation | gate-blocked debit → re-gated `payment_link` → else `human_review` |
 | ✅ Stopping rules | RETRY_CAP (NPCI 1+3) + HARD_DECLINE halt in `policy_engine.py` |
+| ✅ Metrics that measure only what is really possible | `MANDATE_REQUIRED` — no mandate, no silent retry, no "recovery" |
 | ✅ Channel compliance actually exercised | `nudge` is a **separately gated** action → `notifications.py` |
 | ✅ Audit trail | `audit.py` — append-only `AuditEntry` per stage |
 | ✅ Measured money recovered across a batch | `metrics.py` over 50+ synthetic txns |
@@ -104,7 +105,7 @@ link and the nudge are two proposals with two independent gate checks — which 
 
 ## Honest caveats (say these out loud — judges reward candor)
 - Notifications are **mocked** (template + compliance checks are real; nothing is sent).
-  They are wired into the executed path — 31 templates logged, 2 suppressed by TRAI
+  They are wired into the executed path — 39 templates logged, 2 suppressed by TRAI
   rules in the default run — but `notifications.send()` only ever logs.
 - **False-positive cost is 1, and we left it there.** txn_049 is a subscription whose
   24-hour pre-debit notice was never sent. The gate correctly refuses the debit; the
@@ -113,10 +114,16 @@ link and the nudge are two proposals with two independent gate checks — which 
   no pre-debit notice, so the fallback is defensible — but the stricter reading is too,
   so the ground truth was **not** edited to match our own output. A non-zero,
   explicable FP is better evidence than a suspiciously clean zero.
-- **Known modelling gap:** `soft` + non-subscription still proposes `retry`, and that
-  is where nearly all the recovered rupees come from — but a merchant cannot silently
-  re-charge a one-time payment with no mandate either. Fixing this would move the
-  headline number, so it is called out rather than quietly patched.
+- **We cut our own headline number by 64% on purpose (Rs.18,188 -> Rs.6,497).**
+  Earlier, `soft` + non-subscription failures proposed a silent `retry` and "recovered"
+  — but a merchant cannot silently re-charge a one-time payment: there is no stored
+  mandate or token, so no debit API exists to call. Those rupees were never actually
+  recoverable; the number was inflated by construction. `rule_mandate_required` now
+  blocks `retry` on any txn without a mandate, and those cases escalate to a
+  customer-initiated payment link and end `pending`. **Every rupee in the recovery
+  figure is now mandate-backed and genuinely re-presentable.** The drop is a
+  correctness fix, not a regression — the old number measured something that could
+  not happen.
 - Synthetic 54-txn batch drives deterministic outcomes so the demo never stalls.
 
 ### What the LIVE Razorpay calls actually returned (Phase 4, measured — not claimed)

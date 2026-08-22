@@ -38,6 +38,20 @@ OPT_OUT_COOLDOWN_DAYS = 90
 # --- Per-customer spend / attempt cap (over-contact rokne ke liye) ------------
 MAX_RECOVERY_ATTEMPTS_PER_CUSTOMER_PER_DAY = 2
 
+# --- Mandate requirement for silent re-presentment (Phase 3.6) ---------------
+# Ek ONE-TIME payment ko merchant chupchap dobara charge nahi kar sakta — koi
+# stored mandate/token hai hi nahi. Silent retry SIRF mandate-backed txn pe
+# possible hai (Subscriptions / e-mandate / UPI Autopay), kyunki wahan customer
+# ne pehle se ek registered mandate ke against debit karne ki permission di hai.
+# Bina mandate ke recovery ka ekmatra compliant rasta = customer-initiated
+# payment link, jahan customer khud authenticate karta hai.
+#
+# Ye sirf compliance nahi, PLUMBING ki sacchai hai: bina token ke koi debit API
+# hai hi nahi. Isliye ye rule metrics ko bhi honest karta hai — pehle hum
+# one-time failures ko "retry se recover" maan rahe the, jo real duniya mein
+# hota hi nahi.
+RETRY_REQUIRES_MANDATE = True
+
 # --- Escalation policy (Phase 3.5) -------------------------------------------
 # Gate ne proposed DEBIT block kar diya -> kya ek automated fallback
 # (customer-initiated payment link) allowed hai, ya seedha human review?
@@ -47,7 +61,8 @@ MAX_RECOVERY_ATTEMPTS_PER_CUSTOMER_PER_DAY = 2
 # rasta band hai, par customer khud pay kar sakta hai -> payment link bhejna
 # textbook dunning hai. (Customer-initiated link pe na mandate cap lagta hai,
 # na 24-hour pre-debit notice — kyunki wo silent debit hai hi nahi.)
-FALLBACK_ELIGIBLE_RULES = {"RETRY_CAP", "HARD_DECLINE", "PRE_DEBIT_NOTICE"}
+FALLBACK_ELIGIBLE_RULES = {"RETRY_CAP", "HARD_DECLINE", "PRE_DEBIT_NOTICE",
+                           "MANDATE_REQUIRED"}
 
 # HUMAN_ESCALATION: defect AUTHORIZATION ya CONTACT-PERMISSION ka hai.
 #   AFA_THRESHOLD  -> itni badi value unattended recover nahi karni (merchant

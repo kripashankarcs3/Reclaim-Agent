@@ -32,6 +32,19 @@ def rule_hard_decline(action: str, txn, label: str) -> Tuple[bool, str]:
     return True, ""
 
 
+def rule_mandate_required(action: str, txn) -> Tuple[bool, str]:
+    """
+    Silent retry SIRF mandate-backed txn pe. One-time payment ka koi stored
+    token nahi hota — merchant use chupchap dobara charge kar hi nahi sakta.
+    Bina iske hum "recovered" wo paisa maan lete the jo real mein recoverable
+    hi nahi tha (metrics inflate ho rahe the).
+    """
+    if action == "retry" and config.RETRY_REQUIRES_MANDATE and not txn.is_subscription:
+        return False, ("MANDATE_REQUIRED: one-time payment has no mandate/token — "
+                       "cannot be silently re-charged (customer-initiated link only)")
+    return True, ""
+
+
 def rule_afa_threshold(action: str, txn) -> Tuple[bool, str]:
     """> Rs.15,000 pe silent recurring debit BLOCK — AFA/customer auth chahiye."""
     silent_debit = action in ("retry",)
@@ -97,6 +110,7 @@ def check(action: str, txn, label: str, now: datetime = None,
     results = [
         ("RETRY_CAP",       rule_retry_cap(action, txn)),
         ("HARD_DECLINE",    rule_hard_decline(action, txn, label)),
+        ("MANDATE_REQUIRED", rule_mandate_required(action, txn)),
         ("AFA_THRESHOLD",   rule_afa_threshold(action, txn)),
         ("PRE_DEBIT_NOTICE", rule_pre_debit_notice(action, txn)),
         ("CONTACT_WINDOW",  rule_contact_window(action, txn, now)),

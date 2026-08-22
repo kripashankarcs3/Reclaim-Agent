@@ -50,14 +50,23 @@ def generate():
     txns = []
     i = 0
 
-    # 1) Soft / transient (15) — retry allowed
+    # 1) Soft / transient (15) — half mandate-backed, half one-time.
+    #    Mandate-backed  -> retry legitimately allowed (recoverable).
+    #    One-time        -> koi token nahi, silent retry possible hi nahi:
+    #                       gate MANDATE_REQUIRED pe block karega -> link.
+    #    Draw order (code -> is_sub -> retry_count -> _mk) preserve karna zaroori
+    #    hai warna poora batch shift ho jayega.
     for _ in range(15):
         i += 1
-        txns.append(_mk(i, status="failed", error_code=random.choice(_SOFT),
+        code = random.choice(_SOFT)
+        is_sub = random.random() < 0.5
+        rc = random.choice([0, 1])
+        txns.append(_mk(i, status="failed", error_code=code,
                         error_source="gateway", error_step="authorization",
-                        is_subscription=random.random() < 0.5,
-                        pre_debit_notice_sent=True, retry_count=random.choice([0, 1]),
-                        gt_label="soft", gt_should_recover=True, gt_correct_action="retry"))
+                        is_subscription=is_sub,
+                        pre_debit_notice_sent=True, retry_count=rc,
+                        gt_label="soft", gt_should_recover=True,
+                        gt_correct_action="retry" if is_sub else "payment_link"))
 
     # 2) Hard decline (12) — stop retry -> link
     for _ in range(12):
@@ -105,13 +114,18 @@ def generate():
         dict(amount=30000, is_subscription=True, error_code="insufficient_funds",
              status="halted", retry_count=3, pre_debit_notice_sent=True,
              gt_label="halted", gt_should_recover=False, gt_correct_action="human_review"),
-        # Same customer as previous soft txn -> 2nd attempt allowed, 3rd blocks (spend cap demo)
+        # Same customer, teen baar. Ye ONE-TIME payments hain (deliberately —
+        # inhe subscription bana dena sirf recovery number bachane ke liye hota,
+        # aur wahi cheating hai). Pehla: retry MANDATE_REQUIRED pe block -> link
+        # (+nudge) = 2 attempts. Uske baad SPEND_CAP contact actions pe lag jata
+        # hai, to doosra/teesra human review. Cap ab wahi demonstrate karta hai
+        # jiske liye wo bana tha: over-CONTACT rokna.
         dict(customer_id="cust_repeat", amount=499, error_code="GATEWAY_ERROR",
              status="failed", pre_debit_notice_sent=True,
-             gt_label="soft", gt_should_recover=True, gt_correct_action="retry"),
+             gt_label="soft", gt_should_recover=True, gt_correct_action="payment_link"),
         dict(customer_id="cust_repeat", amount=499, error_code="GATEWAY_ERROR",
              status="failed", pre_debit_notice_sent=True,
-             gt_label="soft", gt_should_recover=True, gt_correct_action="retry"),
+             gt_label="soft", gt_should_recover=False, gt_correct_action="human_review"),
         dict(customer_id="cust_repeat", amount=499, error_code="GATEWAY_ERROR",
              status="failed", pre_debit_notice_sent=True,
              gt_label="soft", gt_should_recover=False, gt_correct_action="human_review"),
