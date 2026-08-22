@@ -170,6 +170,11 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                         "escalated_from": escalated_from,
                         "allowed": verdict["allowed"], "outcome": outcome,
                         "reasons": gate_reasons, "failed_rules": failed_rules,
+                        # `link` = executor ka artifact (mock ya real). Iski
+                        # presence hi batati hai ki customer ke paas pay karne ka
+                        # rasta bana ya nahi — metrics isi pe "actioned" ginta hai,
+                        # action ke naam se guess nahi karta.
+                        "link": link,
                         "nudge": nudge})
 
     return results, log

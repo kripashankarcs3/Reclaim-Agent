@@ -17,7 +17,27 @@ def compute(results: List[Dict]) -> Dict:
       outcome in: recovered / pending / human_review / not_attempted
     """
     total_at_risk = sum(r["txn"].amount for r in results)
+
+    # RECOVERED = customer ne actually PAY kar diya. Bas yahi "recovered" hai.
     recovered_val = sum(r["txn"].amount for r in results if r["outcome"] == "recovered")
+
+    # ACTIONED = recovered + wo pending cases jinke paas ek live payment link hai
+    # (yaani customer ke paas pay karne ka rasta bana diya gaya hai).
+    # Ye DO ALAG numbers hain aur alag hi rahenge: ek link payment nahi hota jab
+    # tak koi use bhar na de. Inhe jodkar ek "recovery rate" dikhana wahi
+    # inflation hoti jo Phase 3.6 mein hataayi thi.
+    # NOTE: `link` ki presence check karte hain, action ke naam se guess nahi —
+    # ek allowed retry jo recover nahi hua wo bhi "pending" hota hai par uske
+    # paas koi link nahi hota, to wo actioned mein nahi ginta.
+    pending_link = [r for r in results
+                    if r["outcome"] == "pending" and r.get("link")]
+    pending_link_value = sum(r["txn"].amount for r in pending_link)
+    at_risk_actioned = recovered_val + pending_link_value
+
+    # Pending par bina link ke (allowed retry jo fail hua) — customer ke paas
+    # abhi koi rasta nahi. Honest reporting ke liye alag se ginte hain.
+    pending_no_link = [r for r in results
+                       if r["outcome"] == "pending" and not r.get("link")]
 
     # Diagnoser precision: predicted label == ground-truth label
     labelled = [r for r in results if r["txn"].gt_label is not None]
@@ -74,6 +94,12 @@ def compute(results: List[Dict]) -> Dict:
         "total_at_risk": total_at_risk,
         "recovered_value": recovered_val,
         "recovery_rate_pct": round(100 * recovered_val / total_at_risk, 1) if total_at_risk else 0,
+        "at_risk_actioned": at_risk_actioned,
+        "at_risk_actioned_pct": round(100 * at_risk_actioned / total_at_risk, 1) if total_at_risk else 0,
+        "pending_link_value": pending_link_value,
+        "pending_link_count": len(pending_link),
+        "pending_no_link_value": sum(r["txn"].amount for r in pending_no_link),
+        "pending_no_link_count": len(pending_no_link),
         "diagnoser_precision_pct": round(100 * precision, 1),
         "compliance_blocks_avoided": compliance_blocks_avoided,
         "gate_blocks_by_rule": dict(gate_blocks_by_rule),
@@ -93,7 +119,13 @@ def print_report(m: Dict) -> None:
     print("=" * 60)
     print(f"  Transactions processed : {m['total_txns']}")
     print(f"  Total at-risk          : Rs.{m['total_at_risk']:,}")
-    print(f"  Recovered              : Rs.{m['recovered_value']:,} ({m['recovery_rate_pct']}%)")
+    print(f"  Recovered (customer paid)        : Rs.{m['recovered_value']:,} ({m['recovery_rate_pct']}%)")
+    print(f"  At-risk actioned (links pending) : Rs.{m['at_risk_actioned']:,} "
+          f"({m['at_risk_actioned_pct']}%)  - NOT yet paid")
+    print(f"    of which awaiting customer     : Rs.{m['pending_link_value']:,} "
+          f"across {m['pending_link_count']} live links")
+    print(f"    pending with no link at all    : Rs.{m['pending_no_link_value']:,} "
+          f"across {m['pending_no_link_count']} cases (retry allowed but did not recover)")
     print(f"  Diagnoser precision    : {m['diagnoser_precision_pct']}%")
     print(f"  Compliance blocks (good): {m['compliance_blocks_avoided']}")
     print(f"  Wrong actions (FP cost) : {m['wrong_actions_false_positive']}")

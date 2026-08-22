@@ -71,7 +71,7 @@ refusals on it and routes it to a human:
 | ✅ Metrics that measure only what is really possible | `MANDATE_REQUIRED` — no mandate, no silent retry, no "recovery" |
 | ✅ Channel compliance actually exercised | `nudge` is a **separately gated** action → `notifications.py` |
 | ✅ Audit trail | `audit.py` — append-only `AuditEntry` per stage |
-| ✅ Measured money recovered across a batch | `metrics.py` over 50+ synthetic txns |
+| ✅ Measured money recovered across a batch | `metrics.py` over 50+ synthetic txns — **recovered and actioned reported separately** |
 | ✅ Honest metrics + false-positive cost | `metrics.py` (precision, FP cost, exception list) |
 | ✅ One failure handled gracefully | the policy BLOCK moment (9 PM / >₹15k / hard decline) |
 
@@ -124,6 +124,17 @@ link and the nudge are two proposals with two independent gate checks — which 
   figure is now mandate-backed and genuinely re-presentable.** The drop is a
   correctness fix, not a regression — the old number measured something that could
   not happen.
+- **Two numbers, never merged: recovered vs actioned.** *Recovered* (Rs.6,497, 3.1%)
+  means the customer actually paid. *At-risk actioned* (Rs.96,457, 45.9%) means we got
+  a compliant recovery path in front of the customer — 41 live payment links worth
+  Rs.89,960 — but **a link is not a payment until somebody pays it**, so that money is
+  reported as in-flight, not recovered. Folding the two together would re-create exactly
+  the inflation Phase 3.6 removed, so `metrics.py` computes and prints them as separate
+  lines and never sums them into one "recovery rate".
+- **Rs.7,495 across 5 cases is pending with no link at all** — a mandate-backed retry
+  the gate allowed, which then did not recover. Because the retry was permitted there
+  was no gate block, so no fallback link was generated and the customer currently has
+  no way to pay. Reported explicitly rather than buried in "pending".
 - Synthetic 54-txn batch drives deterministic outcomes so the demo never stalls.
 
 ### What the LIVE Razorpay calls actually returned (Phase 4, measured — not claimed)
