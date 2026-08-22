@@ -1,0 +1,13 @@
+# Core spine (run_batch.py) needs NO external deps — pure stdlib.
+# Below are for Phase 4-5 (real Razorpay + agent + webhook + LLM):
+fastapi
+uvicorn
+razorpay
+python-dotenv
+pydantic
+sqlalchemy
+langgraph
+langchain-llm
+LLM provider
+apscheduler
+httpx
