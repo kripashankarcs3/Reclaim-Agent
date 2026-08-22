@@ -125,16 +125,26 @@ link and the nudge are two proposals with two independent gate checks — which 
   correctness fix, not a regression — the old number measured something that could
   not happen.
 - **Two numbers, never merged: recovered vs actioned.** *Recovered* (Rs.6,497, 3.1%)
-  means the customer actually paid. *At-risk actioned* (Rs.96,457, 45.9%) means we got
-  a compliant recovery path in front of the customer — 41 live payment links worth
-  Rs.89,960 — but **a link is not a payment until somebody pays it**, so that money is
+  means the customer actually paid. *At-risk actioned* (Rs.103,952, 49.5%) means we got
+  a compliant recovery path in front of the customer — 46 live payment links worth
+  Rs.97,455 — but **a link is not a payment until somebody pays it**, so that money is
   reported as in-flight, not recovered. Folding the two together would re-create exactly
   the inflation Phase 3.6 removed, so `metrics.py` computes and prints them as separate
   lines and never sums them into one "recovery rate".
-- **Rs.7,495 across 5 cases is pending with no link at all** — a mandate-backed retry
-  the gate allowed, which then did not recover. Because the retry was permitted there
-  was no gate block, so no fallback link was generated and the customer currently has
-  no way to pay. Reported explicitly rather than buried in "pending".
+- **No dead ends: every case exits with a route or a reason.** An allowed retry that
+  runs and still does not recover used to end `pending` with no link — the customer had
+  no way to pay and nothing was flagged. Those cases now fall through to a
+  customer-initiated payment link, **re-proposed and re-gated** like any other action.
+  The "pending with no link" line is 0 at 2 PM; at 9 PM the same five cases become
+  `human_review` carrying `CONTACT_WINDOW`, because a link we may not tell the customer
+  about is not a route. Two escalation kinds are counted separately so the labels stay
+  honest: *blocked debit -> link* (17) and *failed retry -> link* (5).
+- **The spend cap bites here, on purpose.** A failed retry consumes one recovery
+  attempt and its fallback link consumes a second, so the follow-up nudge hits the
+  2-per-customer-per-day cap and is suppressed (7 suppressed nudges, up from 2). The
+  customer therefore has a live link but is not messaged about it today. Exempting
+  retries from the cap would "fix" this number by gaming the very rule that exists to
+  prevent over-contact, so we leave it and surface the case for human review instead.
 - Synthetic 54-txn batch drives deterministic outcomes so the demo never stalls.
 
 ### What the LIVE Razorpay calls actually returned (Phase 4, measured — not claimed)

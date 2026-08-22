@@ -100,6 +100,7 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
 
         action = proposed
         escalated_from = None
+        escalation_kind = None       # gate_blocked | retry_failed
         gate_reasons = []
         failed_rules = list(verdict["failed_rules"])
         link = None
@@ -115,6 +116,36 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                 action, gate_reasons = "human_review", [exec_err]
             else:
                 customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+
+                # 5b) RETRY CHALA PAR RECOVER NAHI HUA -> dead end mat chhodo.
+                # Gate ne retry allow kiya tha, attempt hua, phir bhi paisa nahi
+                # aaya. Aise case ko `pending` par bina link ke chhod dena matlab
+                # customer ke paas pay karne ka koi rasta hi nahi — closed-loop
+                # agent mein ye dead end hai. Isliye customer-initiated link
+                # propose karo — aur use bhi DOBARA gate se guzaro (koi bypass
+                # nahi, wahi escalation pattern jo blocked retry pe lagta hai).
+                if proposed == "retry" and outcome != "recovered":
+                    fb = "payment_link"
+                    v3 = policy_engine.check(fb, txn, label, now=now,
+                                             customer_state=cust_state())
+                    log.log(txn.id, "policy_check",
+                            {"action": fb, "escalated_from": "retry (attempted, not recovered)",
+                             "allowed": v3["allowed"], "failed_rules": v3["reasons"]})
+                    failed_rules += list(v3["failed_rules"])
+                    if v3["allowed"]:
+                        outcome, link, exec_err = do_execute(fb)
+                        if exec_err:
+                            action = "human_review"
+                            gate_reasons = gate_reasons + [exec_err]
+                        else:
+                            action, escalated_from = fb, "retry"
+                            escalation_kind = "retry_failed"
+                            customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
+                    else:
+                        # Link bhi gated (window / spend cap / TRAI) -> human review
+                        # with reasons. Chup-chaap dead end kabhi nahi.
+                        gate_reasons += list(v3["reasons"])
+                        action, outcome = "human_review", "human_review"
         else:
             gate_reasons = list(verdict["reasons"])
             fb = decider.fallback(proposed, verdict["failed_rules"])
@@ -133,6 +164,7 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                         gate_reasons = gate_reasons + [exec_err]
                     else:
                         action, escalated_from = fb, proposed
+                        escalation_kind = "gate_blocked"
                         customer_attempts[cid] = customer_attempts.get(cid, 0) + 1
                 else:
                     gate_reasons += list(v2["reasons"])
@@ -164,10 +196,12 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
                 nudge = {"status": "suppressed", "reasons": list(vn["reasons"])}
 
         log.log(txn.id, "outcome", {"outcome": outcome, "reasons": gate_reasons,
-                                    "escalated_from": escalated_from})
+                                    "escalated_from": escalated_from,
+                                    "escalation_kind": escalation_kind})
         results.append({"txn": txn, "label": label,
                         "proposed_action": proposed, "action": action,
                         "escalated_from": escalated_from,
+                        "escalation_kind": escalation_kind,
                         "allowed": verdict["allowed"], "outcome": outcome,
                         "reasons": gate_reasons, "failed_rules": failed_rules,
                         # `link` = executor ka artifact (mock ya real). Iski

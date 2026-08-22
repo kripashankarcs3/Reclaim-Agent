@@ -69,8 +69,13 @@ def compute(results: List[Dict]) -> Dict:
     for r in results:
         gate_blocks_by_rule.update(r.get("failed_rules", []))
 
-    # Blocked debit -> compliant payment link pe escalate hue kitne case.
-    escalated_to_link = sum(1 for r in results if r.get("escalated_from"))
+    # Do alag escalations — labels honest rakhne ke liye alag-alag gine jate hain:
+    #   gate_blocked : gate ne debit BLOCK kiya -> link
+    #   retry_failed : retry ALLOWED tha, chala, recover nahi hua -> link
+    escalated_to_link = sum(1 for r in results
+                            if r.get("escalation_kind") == "gate_blocked")
+    retry_failed_to_link = sum(1 for r in results
+                               if r.get("escalation_kind") == "retry_failed")
 
     # Nudges: bheje kitne, aur policy ne kitne rok diye (over-contact bacha).
     nudges_sent = sum(1 for r in results
@@ -104,6 +109,7 @@ def compute(results: List[Dict]) -> Dict:
         "compliance_blocks_avoided": compliance_blocks_avoided,
         "gate_blocks_by_rule": dict(gate_blocks_by_rule),
         "escalated_to_link": escalated_to_link,
+        "retry_failed_to_link": retry_failed_to_link,
         "nudges_sent": nudges_sent,
         "nudges_suppressed": nudges_suppressed,
         "wrong_actions_false_positive": wrong_actions,
@@ -130,6 +136,7 @@ def print_report(m: Dict) -> None:
     print(f"  Compliance blocks (good): {m['compliance_blocks_avoided']}")
     print(f"  Wrong actions (FP cost) : {m['wrong_actions_false_positive']}")
     print(f"  Blocked debit -> link    : {m['escalated_to_link']} (compliant escalation)")
+    print(f"  Failed retry -> link     : {m['retry_failed_to_link']} (no dead ends)")
     print(f"  Nudges sent / suppressed : {m['nudges_sent']} / {m['nudges_suppressed']}")
     print("\n  Gate blocks by rule (every refusal comes from policy_engine):")
     for rule, n in sorted(m["gate_blocks_by_rule"].items(),
