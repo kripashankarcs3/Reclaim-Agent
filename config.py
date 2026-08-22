@@ -38,5 +38,25 @@ OPT_OUT_COOLDOWN_DAYS = 90
 # --- Per-customer spend / attempt cap (over-contact rokne ke liye) ------------
 MAX_RECOVERY_ATTEMPTS_PER_CUSTOMER_PER_DAY = 2
 
+# --- Escalation policy (Phase 3.5) -------------------------------------------
+# Gate ne proposed DEBIT block kar diya -> kya ek automated fallback
+# (customer-initiated payment link) allowed hai, ya seedha human review?
+# Ye decision bhi rules-as-code hai, ad-hoc nahi.
+#
+# FALLBACK_ELIGIBLE: defect IS DEBIT ATTEMPT ka hai. Mandate re-presentment ka
+# rasta band hai, par customer khud pay kar sakta hai -> payment link bhejna
+# textbook dunning hai. (Customer-initiated link pe na mandate cap lagta hai,
+# na 24-hour pre-debit notice — kyunki wo silent debit hai hi nahi.)
+FALLBACK_ELIGIBLE_RULES = {"RETRY_CAP", "HARD_DECLINE", "PRE_DEBIT_NOTICE"}
+
+# HUMAN_ESCALATION: defect AUTHORIZATION ya CONTACT-PERMISSION ka hai.
+#   AFA_THRESHOLD  -> itni badi value unattended recover nahi karni (merchant
+#                     policy; AFA customer ke saamne hona chahiye).
+#   CONTACT_WINDOW / TRAI_MESSAGING / SPEND_CAP -> abhi customer ko contact
+#                     karne ki ijazat hi nahi. Aise mein link+nudge wala
+#                     fallback EXACTLY wahi hai jo nahi karna chahiye.
+HUMAN_ESCALATION_RULES = {"AFA_THRESHOLD", "CONTACT_WINDOW",
+                          "TRAI_MESSAGING", "SPEND_CAP"}
+
 # --- Currency ----------------------------------------------------------------
 CURRENCY = "INR"

@@ -15,6 +15,22 @@ _SOFT = ["GATEWAY_ERROR", "payment_timeout", "gateway_timeout", "SERVER_ERROR"]
 _HARD = ["insufficient_funds", "card_declined", "invalid_vpa", "card_expired"]
 
 
+# --- TRAI TCCCPR customer state (deterministic; batch ke saath rehta hai) -----
+# Do customers messaging rules ko HAR run mein exercise karte hain: unka
+# payment link ban jayega (link banana koi contact nahi hai) par nudge gate pe
+# block hoga. Warna rule_trai_messaging kabhi chalta hi nahi tha.
+OPTED_OUT_CUSTOMERS = {"cust_030"}    # 90-din opt-out cooldown ke andar
+NO_CONSENT_CUSTOMERS = {"cust_033"}   # DLT messaging consent record pe nahi
+
+
+def messaging_state(customer_id: str) -> dict:
+    """policy_engine.check() ko dene ke liye per-customer TRAI state."""
+    return {
+        "has_consent": customer_id not in NO_CONSENT_CUSTOMERS,
+        "opted_out_within_cooldown": customer_id in OPTED_OUT_CUSTOMERS,
+    }
+
+
 def _mk(i, **kw):
     base = dict(
         id=f"txn_{i:03d}",

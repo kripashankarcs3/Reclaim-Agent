@@ -5,14 +5,16 @@ Track 03 bar: "measured money recovered across a batch... one cherry-picked
 match proves nothing." Isliye ye aggregate + exception list + false-positive
 cost deta hai. False-positive cost dikhana = tum mature ho (sirf "recover" nahi).
 """
+from collections import Counter
 from typing import List, Dict
 
 
 def compute(results: List[Dict]) -> Dict:
     """
     results: har txn ke liye ek dict:
-      {txn, label, action, allowed, outcome, reasons}
-      outcome in: recovered / pending / blocked / human_review / not_attempted
+      {txn, label, proposed_action, action, escalated_from, allowed,
+       outcome, reasons, failed_rules, nudge}
+      outcome in: recovered / pending / human_review / not_attempted
     """
     total_at_risk = sum(r["txn"].amount for r in results)
     recovered_val = sum(r["txn"].amount for r in results if r["outcome"] == "recovered")
@@ -25,7 +27,9 @@ def compute(results: List[Dict]) -> Dict:
     # False-positive cost:
     #  (a) blocks we correctly avoided (compliance saves) — good
     #  (b) actions taken on txns whose ground truth said should_recover=False — bad
-    compliance_blocks_avoided = sum(1 for r in results if r["outcome"] in ("blocked", "human_review"))
+    # NOTE: "blocked" ab terminal outcome nahi hai — gate-blocked debit ya to
+    # compliant fallback pe escalate hota hai, ya human_review banta hai.
+    compliance_blocks_avoided = sum(1 for r in results if r["outcome"] == "human_review")
     wrong_actions = sum(
         1 for r in results
         if r["txn"].gt_should_recover is False and r["outcome"] in ("recovered", "pending")
@@ -39,14 +43,30 @@ def compute(results: List[Dict]) -> Dict:
         if r["outcome"] == "recovered":
             c["recovered"] += 1
 
+    # Gate-produced refusals: kaunsa rule kitni baar fire hua.
+    # (Phase 3.5: refusal ab decider ke short-circuit se nahi, gate se aata hai.)
+    gate_blocks_by_rule = Counter()
+    for r in results:
+        gate_blocks_by_rule.update(r.get("failed_rules", []))
+
+    # Blocked debit -> compliant payment link pe escalate hue kitne case.
+    escalated_to_link = sum(1 for r in results if r.get("escalated_from"))
+
+    # Nudges: bheje kitne, aur policy ne kitne rok diye (over-contact bacha).
+    nudges_sent = sum(1 for r in results
+                      if (r.get("nudge") or {}).get("status") == "sent")
+    nudges_suppressed = sum(1 for r in results
+                            if (r.get("nudge") or {}).get("status") == "suppressed")
+
     by_action: Dict[str, int] = {}
     for r in results:
         by_action[r["action"]] = by_action.get(r["action"], 0) + 1
 
     exceptions = [
         {"txn": r["txn"].id, "amount": r["txn"].amount, "label": r["label"],
-         "outcome": r["outcome"], "reasons": r["reasons"]}
-        for r in results if r["outcome"] in ("blocked", "human_review", "not_attempted")
+         "proposed": r.get("proposed_action"), "outcome": r["outcome"],
+         "reasons": r["reasons"]}
+        for r in results if r["outcome"] in ("human_review", "not_attempted")
     ]
 
     return {
@@ -56,6 +76,10 @@ def compute(results: List[Dict]) -> Dict:
         "recovery_rate_pct": round(100 * recovered_val / total_at_risk, 1) if total_at_risk else 0,
         "diagnoser_precision_pct": round(100 * precision, 1),
         "compliance_blocks_avoided": compliance_blocks_avoided,
+        "gate_blocks_by_rule": dict(gate_blocks_by_rule),
+        "escalated_to_link": escalated_to_link,
+        "nudges_sent": nudges_sent,
+        "nudges_suppressed": nudges_suppressed,
         "wrong_actions_false_positive": wrong_actions,
         "by_cause": by_cause,
         "by_action": by_action,
@@ -73,6 +97,12 @@ def print_report(m: Dict) -> None:
     print(f"  Diagnoser precision    : {m['diagnoser_precision_pct']}%")
     print(f"  Compliance blocks (good): {m['compliance_blocks_avoided']}")
     print(f"  Wrong actions (FP cost) : {m['wrong_actions_false_positive']}")
+    print(f"  Blocked debit -> link    : {m['escalated_to_link']} (compliant escalation)")
+    print(f"  Nudges sent / suppressed : {m['nudges_sent']} / {m['nudges_suppressed']}")
+    print("\n  Gate blocks by rule (every refusal comes from policy_engine):")
+    for rule, n in sorted(m["gate_blocks_by_rule"].items(),
+                          key=lambda kv: -kv[1]):
+        print(f"    {rule:<18} {n}")
     print("\n  Recovery by root cause:")
     for cause, c in m["by_cause"].items():
         print(f"    {cause:<10} count={c['count']:<3} recovered={c['recovered']:<3} value=Rs.{c['value']:,}")

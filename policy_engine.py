@@ -86,7 +86,10 @@ def check(action: str, txn, label: str, now: datetime = None,
           customer_state: Dict = None) -> Dict:
     """
     Saare applicable rules chalao. Ek bhi fail -> allowed=False.
-    Returns: {allowed: bool, reasons: [str], checks: [{rule, passed, reason}]}
+    Returns: {allowed: bool, reasons: [str], failed_rules: [str],
+              checks: [{rule, passed, reason}]}
+    `failed_rules` = fail hue rules ke NAAM (routing/escalation ke liye);
+    `reasons` = unke human-readable messages (audit/UI ke liye).
     """
     now = now or datetime.now()
     customer_state = customer_state or {}
@@ -104,9 +107,11 @@ def check(action: str, txn, label: str, now: datetime = None,
     checks = [{"rule": name, "passed": ok, "reason": reason}
               for name, (ok, reason) in results]
     fail_reasons = [reason for _, (ok, reason) in results if not ok]
+    failed_rules = [name for name, (ok, _) in results if not ok]
 
     return {
         "allowed": len(fail_reasons) == 0,
         "reasons": fail_reasons,
+        "failed_rules": failed_rules,
         "checks": checks,
     }
