@@ -13,7 +13,7 @@ and an honest exception list.
 > `policy_engine.check()` first; any rule failure = **blocked + logged with reason**.
 
 This is the whole defense: judges will try to make the agent do something
-unsafe — the *runtime* (not the prompt) refuses.
+unsafe — the *runtime*  refuses.
 
 ## Run the winning spine (no keys, no network needed)
 ```bash
