@@ -29,20 +29,26 @@ fallback bina dobara check hue execute tak nahi pahunch sakta.
 ⚠️ INVARIANTS: LLM kabhi paisa nahi hilata; policy_engine hi refuse karta hai;
 audit append-only; default offline (koi key/network nahi).
 """
+import os
 from datetime import datetime
 from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, StateGraph
 
 import pipeline
+import store as store_mod
 from audit import AuditLog
 from models import Transaction
 
-# Ek hi append-only audit log + ek long-lived Ctx (spend-cap tally events ke
-# aar-paar chalta rehta hai). In-memory hai — process restart pe reset.
-# Phase 6 (persistence) ise DB se back karega; tab tak ye honest limitation hai.
+# Ek hi append-only audit log + ek long-lived Ctx.
+# Phase 6: attempt history aur contact tally ab SQLite mein hain, isliye ye
+# process RESTART ke baad bhi zinda rehte hain — yahi wo gap tha jiski wajah se
+# live webhook har event ko "attempt #1" samajh leta aur NPCI 1+3 / spend cap
+# enforce hi nahi ho pate the.
+DB_PATH = os.getenv("RECLAIM_DB", "reclaim.db")
 AUDIT = AuditLog()
-CTX = pipeline.Ctx(log=AUDIT, now=datetime.now())
+STORE = store_mod.Store(DB_PATH)
+CTX = pipeline.Ctx(log=AUDIT, now=datetime.now(), store=STORE)
 
 
 # --- Razorpay event -> Transaction -------------------------------------------
@@ -168,5 +174,6 @@ def handle_event(event: Dict[str, Any], now: datetime = None,
 
 
 def reset_state() -> None:
-    """Test/demo helper — spend-cap counters saaf karo (audit append-only rehta hai)."""
-    CTX.customer_attempts.clear()
+    """Test/demo helper — persisted attempt history saaf karo.
+    Audit log ko chhuta bhi nahi (append-only invariant intact)."""
+    STORE.reset()

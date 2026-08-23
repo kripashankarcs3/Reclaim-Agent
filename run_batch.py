@@ -25,6 +25,7 @@ from datetime import datetime
 
 import seed
 import pipeline
+import store as store_mod
 from audit import AuditLog
 import metrics
 
@@ -42,9 +43,13 @@ def run(demo_hour=14, show_notifications=False, live=False, live_limit=1):
     """
     now = datetime.now().replace(hour=demo_hour, minute=30)
     log = AuditLog()
+    # THROWAWAY in-memory store: har batch run khaali DB se shuru hota hai aur
+    # pehle touch par seed.py ki ground truth se khud bhar jata hai. Isliye
+    # persistence add karne ke baad bhi batch ka output bilkul same rehta hai.
     ctx = pipeline.Ctx(log=log, now=now, live=live, live_limit=live_limit,
                        show_notifications=show_notifications,
-                       messaging_state=seed.messaging_state)
+                       messaging_state=seed.messaging_state,
+                       store=store_mod.Store(":memory:"))
     results = [pipeline.process_txn(txn, ctx) for txn in seed.generate()]
     return results, log
 

@@ -28,6 +28,7 @@ import diagnoser
 import executor
 import notifications
 import policy_engine
+from store import Store
 
 
 def _default_messaging_state(_customer_id: str) -> Dict[str, Any]:
@@ -42,7 +43,8 @@ class Ctx:
 
     def __init__(self, log, now, live: bool = False, live_limit: int = 1,
                  show_notifications: bool = False,
-                 messaging_state: Optional[Callable[[str], Dict[str, Any]]] = None):
+                 messaging_state: Optional[Callable[[str], Dict[str, Any]]] = None,
+                 store: Optional[Store] = None):
         self.log = log
         self.now = now
         self.live = live
@@ -50,24 +52,34 @@ class Ctx:
         self.live_created = 0
         self.show_notifications = show_notifications
         self.messaging_state = messaging_state or _default_messaging_state
-        self.customer_attempts: Dict[str, int] = {}
+        # Attempt history + contact tally ab SQLite mein (store.py dekho).
+        # Default `:memory:` = throwaway, batch ke deterministic run ke liye.
+        self.store = store if store is not None else Store(":memory:")
+
+    def day(self) -> str:
+        """Spend cap ka bucket. Date key mein hai to cap ROZ reset hota hai."""
+        return self.now.date().isoformat()
+
+    def hydrate(self, txn):
+        """Persisted attempt-history txn par chadhao (webhook mein ye fields nahi aate)."""
+        return self.store.hydrate(txn)
 
     def cust_state(self, txn) -> Dict[str, Any]:
         """Policy ke liye customer state (spend cap + TRAI consent)."""
         s = dict(self.messaging_state(txn.customer_id))
-        s["attempts_today"] = self.customer_attempts.get(txn.customer_id, 0)
+        s["attempts_today"] = self.store.attempts_today(txn.customer_id, self.day())
         return s
 
     def count_attempt(self, txn, act: str) -> None:
         """
         Spend-cap tally. Wahi definition jo rule_spend_cap use karta hai
         (config.CONTACT_ACTIONS) — warna rule aur counter alag hisaab lagayenge
-        aur cap chupke se galat ho jayega.
+        aur cap chupke se galat ho jayega. Ab ye DB mein jata hai, isliye
+        restart ke baad bhi zinda rehta hai.
         """
         if (not config.SPEND_CAP_COUNTS_CONTACTS_ONLY
                 or act in config.CONTACT_ACTIONS):
-            cid = txn.customer_id
-            self.customer_attempts[cid] = self.customer_attempts.get(cid, 0) + 1
+            self.store.increment_attempt(txn.customer_id, self.day())
 
 
 def new_state(txn) -> Dict[str, Any]:
@@ -85,6 +97,9 @@ def new_state(txn) -> Dict[str, Any]:
 
 def detect(st, ctx: Ctx) -> None:
     txn = st["txn"]
+    # Store se attempt-history chadhao. Ye jaan-boojh kar koi AUDIT ENTRY nahi
+    # likhta — timeline ka shape waisa hi rehna chahiye jo pehle tha.
+    ctx.hydrate(txn)
     ctx.log.log(txn.id, "detect", {"status": txn.status, "amount": txn.amount,
                                    "error_code": txn.error_code})
 
@@ -155,6 +170,10 @@ def execute(st, ctx: Ctx) -> None:
                  "live": bool(artifact and artifact.get("live")),
                  "artifact": artifact})
     ctx.count_attempt(txn, cand)
+    if cand == "retry":
+        # Re-presentment ho gaya -> attempt history DB mein badhao, taaki agla
+        # event (naye process mein bhi) NPCI 1+3 sahi gin sake.
+        ctx.store.record_retry(txn)
     st["outcome"], st["action"] = outcome, cand
     if artifact is not None:
         st["link"] = artifact
