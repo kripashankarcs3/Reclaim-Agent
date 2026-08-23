@@ -84,6 +84,24 @@ refusals on it and routes it to a human:
 - **Per-customer spend cap** (over-contact guard)
 
 ## Architecture
+
+**Two entry points, one pipeline.** `run_batch.py` (offline batch) and `agent.py`
+(one event, LangGraph) both drive `pipeline.py` — the single implementation of a
+transaction's flow. Neither entry point contains business logic, so the batch path and
+the webhook path cannot drift apart.
+
+| module | role |
+|---|---|
+| `pipeline.py` | ⭐ single source of truth: `STEPS` (detect/diagnose/decide/gate/execute/fallback/nudge/escalate/finalize) + `ROUTES` (the escalation predicates) + `Ctx` |
+| `run_batch.py` | thin loop — 54 seeded txns through `pipeline.process_txn()` |
+| `agent.py` | thin LangGraph graph — nodes wrap `pipeline.STEPS`, conditional edges wrap `pipeline.ROUTES`; exposes `handle_event(event)` |
+| `store.py` | SQLite: attempt history (`order_id`) + daily contact tally (`customer_id`, `day`) |
+| `policy_engine.py` | the gate. Every refusal in the system comes from here |
+| `executor.py` | the only module that talks to Razorpay (`dry_run` seam) |
+
+`agent.py`'s graph has a **cycle back into `gate`**: a fallback physically cannot reach
+`execute` without being re-gated. The routing is the graph, not an `if/else`.
+
 ```
 [webhook/batch] -> detector -> diagnoser (label + LLM explanation)
    -> decider (PROPOSE the cheapest tempting action — no safety logic here)
@@ -103,9 +121,20 @@ Creating a payment link contacts nobody; *telling the customer about it* does. S
 link and the nudge are two proposals with two independent gate checks — which is why
 `rule_trai_messaging` and the 8 AM–7 PM window are reachable at all.
 
+**Why persistence had to land before the live webhook.** A Razorpay webhook payload
+contains neither `retry_count` nor `pre_debit_notice_sent` — those are our own state —
+and the contact tally used to live in an in-memory dict. So on the webhook path every
+event looked like attempt #1: NPCI 1+3 could never fire and the spend cap reset on every
+restart. The gate was right; it had nothing to count. `store.py` fixes that, keyed on
+**`order_id` rather than payment id** (Razorpay issues a new payment id per
+re-presentment while the order stays constant), with the **day inside the tally key** so
+the cap resets daily rather than on restart. Proven across five separate processes:
+`retry_count` climbs 0→1→2→3 and the fourth attempt is refused with
+`RETRY_CAP: NPCI 1+3 cap exhausted (4/4 attempts used)`.
+
 ## Honest caveats (say these out loud — judges reward candor)
 - Notifications are **mocked** (template + compliance checks are real; nothing is sent).
-  They are wired into the executed path — 39 templates logged, 2 suppressed by TRAI
+  They are wired into the executed path — 44 templates logged, 2 suppressed by TRAI
   rules in the default run — but `notifications.send()` only ever logs.
 - **False-positive cost is 1, and we left it there.** txn_049 is a subscription whose
   24-hour pre-debit notice was never sent. The gate correctly refuses the debit; the
@@ -194,6 +223,13 @@ link and the nudge are two proposals with two independent gate checks — which 
 Done (runnable spine): DB models · 54-txn seed w/ ground truth · **policy engine** ·
 diagnoser · decider · audit log · metrics · batch harness · mocked notifications ·
 **gate-produced refusals + two-step compliant escalation + separately-gated nudges** ·
-**real Razorpay test-mode executor behind a `dry_run` seam (`--live`)**.
-Next: `main.py` webhook (verify + idempotency) ·
-`agent.py` LangGraph loop · React dashboard (audit timeline = the star panel).
+**real Razorpay test-mode executor behind a `dry_run` seam (`--live`)** ·
+**`pipeline.py` shared flow** · **`agent.py` LangGraph loop (`handle_event`)** ·
+**`store.py` SQLite persistence (attempt history + daily contact tally)**.
+Next: `main.py` webhook (signature verify + `x-razorpay-event-id` idempotency) ·
+audit-log persistence · React dashboard (audit timeline = the star panel).
+
+**Known gap, stated plainly:** the audit log is still in-memory, so on the webhook path
+a restart loses prior timelines. Enforcement needed the attempt history, not the
+timelines — but this lands before the dashboard, or the star panel starts empty after
+every deploy.
