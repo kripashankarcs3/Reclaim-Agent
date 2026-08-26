@@ -47,19 +47,13 @@ def _keys() -> Tuple[str, str]:
     return os.getenv("RAZORPAY_KEY_ID", ""), os.getenv("RAZORPAY_KEY_SECRET", "")
 
 
-def _is_placeholder(value: str) -> bool:
-    """.env.example ke dummy values ko 'unset' maano (rzp_test_xxxxxxxx etc.)."""
-    v = (value or "").strip().lower()
-    return (not v) or ("xxxx" in v) or v.endswith("_here") or v in ("changeme", "todo")
-
-
 def live_available() -> Tuple[bool, str]:
     """(ready, reason). --live se pehle isse check karo — clear error do."""
     key_id, key_secret = _keys()
     if not key_id or not key_secret:
         return False, ("RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET not set. "
                        "Copy .env.example -> .env and fill your test keys.")
-    if _is_placeholder(key_id) or _is_placeholder(key_secret):
+    if config.is_placeholder(key_id) or config.is_placeholder(key_secret):
         return False, ("RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET still hold the "
                        ".env.example placeholders — paste your real rzp_test_ keys.")
     if key_id.startswith("rzp_live_"):

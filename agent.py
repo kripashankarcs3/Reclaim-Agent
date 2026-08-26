@@ -163,14 +163,31 @@ GRAPH = build_graph()
 def handle_event(event: Dict[str, Any], now: datetime = None,
                  live: bool = False) -> List[Dict[str, Any]]:
     """
-    Ek Razorpay-shaped event lo, graph chalao, us case ka audit timeline lauta do.
+    Ek Razorpay-shaped event lo, graph chalao, aur SIRF IS DELIVERY ke audit
+    entries lauta do.
+
+    Kyun sirf is delivery ke: ek hi order par kai events aa sakte hain (Razorpay
+    retry, ya agle billing cycle ka failure). Poora cumulative timeline lautane
+    se HTTP response har delivery ke saath badhta jata hai aur "is event ne kya
+    kiya" dhundhna mushkil ho jata hai. Audit log andar se poora aur append-only
+    hi rehta hai — hum sirf RESPONSE ko is delivery tak scope kar rahe hain.
+    Poori per-case history ke liye case_timeline() hai (dashboard/audit query).
+
     Default offline: live=False -> executor dry-run, koi key/network nahi.
     """
     txn = txn_from_event(event)
     CTX.now = now or datetime.now()
     CTX.live = live
+    # Audit append-only hai, isliye current lambai hi watermark ka kaam karti hai.
+    watermark = len(AUDIT.all())
     GRAPH.invoke({"st": pipeline.new_state(txn)})
-    return [{"stage": e.stage, "detail": e.detail} for e in AUDIT.timeline(txn.id)]
+    return [{"stage": e.stage, "detail": e.detail}
+            for e in AUDIT.all()[watermark:] if e.txn_id == txn.id]
+
+
+def case_timeline(txn_id: str) -> List[Dict[str, Any]]:
+    """Poori per-case history (saari deliveries) — dashboard / audit query ke liye."""
+    return [{"stage": e.stage, "detail": e.detail} for e in AUDIT.timeline(txn_id)]
 
 
 def reset_state() -> None:

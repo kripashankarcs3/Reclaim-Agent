@@ -99,5 +99,14 @@ FALLBACK_ELIGIBLE_RULES = {"RETRY_CAP", "HARD_DECLINE", "PRE_DEBIT_NOTICE",
 HUMAN_ESCALATION_RULES = {"AFA_THRESHOLD", "CONTACT_WINDOW",
                           "TRAI_MESSAGING", "SPEND_CAP"}
 
+# --- Config hygiene -----------------------------------------------------------
+# .env.example ke dummy values ko "unset" maano. Ye ek hi jagah rehta hai taaki
+# executor / diagnoser / main teeno ek hi definition use karein (pehle iski do
+# copies thi).
+def is_placeholder(value: str) -> bool:
+    v = (value or "").strip().lower()
+    return (not v) or ("xxxx" in v) or v.endswith("_here") or v in ("changeme", "todo")
+
+
 # --- Currency ----------------------------------------------------------------
 CURRENCY = "INR"

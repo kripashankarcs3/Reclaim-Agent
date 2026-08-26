@@ -11,6 +11,8 @@ warna deterministic template fallback (taaki bina network ke bhi chale).
 import os
 from typing import Tuple
 
+import config
+
 # error_code -> label mapping. Real codes Razorpay ki official error list se:
 # razorpay.com/docs/errors/payments/list/  (judge poochega "codes kaha se?" -> yahi)
 SOFT_CODES = {"GATEWAY_ERROR", "payment_timeout", "gateway_timeout", "SERVER_ERROR"}
@@ -34,12 +36,6 @@ def classify(txn) -> str:
     return "hard"
 
 
-def _is_placeholder(value: str) -> bool:
-    """.env.example ke dummy values ke dummy placeholders ko unset maano."""
-    v = (value or "").strip().lower()
-    return (not v) or ("xxxx" in v) or v.endswith("_here") or v in ("changeme", "todo")
-
-
 def explain(txn, label: str) -> str:
     """
     Human-readable reason. LLM OPT-IN hai; default offline template.
@@ -54,7 +50,7 @@ def explain(txn, label: str) -> str:
     if os.getenv("RECLAIM_LLM_EXPLAIN", "").strip() not in ("1", "true", "yes"):
         return _explain_template(txn, label)
     key = os.getenv("LLM_API_KEY")
-    if key and not _is_placeholder(key):
+    if key and not config.is_placeholder(key):
         try:
             return _explain_llm(txn, label, key)
         except Exception:
