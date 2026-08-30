@@ -18,7 +18,7 @@ import config
 # Convention: (allowed, reason). allowed=True -> "" reason.
 
 def rule_retry_cap(action: str, txn) -> Tuple[bool, str]:
-    """NPCI 1+3 cap: total 4 attempts. retry_count>=3 -> koi aur retry BLOCK."""
+    """NPCI 1+3 cap: retry is blocked once 4 total attempts have been used."""
     if action == "retry" and txn.retry_count >= config.MAX_RETRIES:
         return False, (f"RETRY_CAP: NPCI 1+3 cap exhausted "
                        f"({txn.retry_count + 1}/{config.MAX_TOTAL_ATTEMPTS} attempts used)")
@@ -26,7 +26,7 @@ def rule_retry_cap(action: str, txn) -> Tuple[bool, str]:
 
 
 def rule_hard_decline(action: str, txn, label: str) -> Tuple[bool, str]:
-    """Hard decline (insufficient funds/blocked card) -> silent auto-retry BLOCK."""
+    """Hard decline (insufficient funds / blocked card): silent auto-retry is blocked."""
     if action == "retry" and label == "hard":
         return False, "HARD_DECLINE: hard decline not eligible for silent retry (link only)"
     return True, ""
@@ -34,10 +34,10 @@ def rule_hard_decline(action: str, txn, label: str) -> Tuple[bool, str]:
 
 def rule_mandate_required(action: str, txn) -> Tuple[bool, str]:
     """
-    Silent retry SIRF mandate-backed txn pe. One-time payment ka koi stored
-    token nahi hota — merchant use chupchap dobara charge kar hi nahi sakta.
-    Bina iske hum "recovered" wo paisa maan lete the jo real mein recoverable
-    hi nahi tha (metrics inflate ho rahe the).
+    Silent retry requires a mandate-backed transaction; a one-time payment has no stored token to charge.
+
+    Without this rule, we were counting money as "recovered" that was never
+    actually recoverable — it was inflating the metrics.
     """
     if action == "retry" and config.RETRY_REQUIRES_MANDATE and not txn.is_subscription:
         return False, ("MANDATE_REQUIRED: one-time payment has no mandate/token — "
@@ -46,7 +46,7 @@ def rule_mandate_required(action: str, txn) -> Tuple[bool, str]:
 
 
 def rule_afa_threshold(action: str, txn) -> Tuple[bool, str]:
-    """> Rs.15,000 pe silent recurring debit BLOCK — AFA/customer auth chahiye."""
+    """Above Rs.15,000, a silent recurring debit is blocked — requires AFA / customer authentication."""
     silent_debit = action in ("retry",)
     if silent_debit and txn.amount > config.AFA_THRESHOLD:
         return False, (f"AFA_THRESHOLD: amount Rs.{txn.amount} > Rs.{config.AFA_THRESHOLD} "
@@ -55,14 +55,14 @@ def rule_afa_threshold(action: str, txn) -> Tuple[bool, str]:
 
 
 def rule_pre_debit_notice(action: str, txn) -> Tuple[bool, str]:
-    """Subscription retry se 24hr pehle notice bheja hona chahiye."""
+    """A subscription retry requires the 24-hour pre-debit notice to have been sent."""
     if action == "retry" and txn.is_subscription and not txn.pre_debit_notice_sent:
         return False, "PRE_DEBIT_NOTICE: 24-hour pre-debit notification not sent"
     return True, ""
 
 
 def rule_contact_window(action: str, txn, now: datetime) -> Tuple[bool, str]:
-    """Customer contact (nudge/link+nudge) sirf 8AM-7PM ke andar."""
+    """Customer contact (nudge / link+nudge) is only allowed between 8 AM and 7 PM."""
     contacts_customer = action in ("nudge", "payment_link", "recovery_link")
     if contacts_customer:
         hour = now.hour
@@ -73,7 +73,7 @@ def rule_contact_window(action: str, txn, now: datetime) -> Tuple[bool, str]:
 
 
 def rule_trai_messaging(action: str, txn, customer_state: Dict) -> Tuple[bool, str]:
-    """Nudge sirf consent ke saath; opt-out ke 90 din tak nahi."""
+    """A nudge requires consent on record and is blocked for 90 days after opt-out."""
     if action == "nudge":
         if customer_state.get("opted_out_within_cooldown"):
             return False, (f"TRAI_MESSAGING: customer opted out within "
@@ -85,11 +85,11 @@ def rule_trai_messaging(action: str, txn, customer_state: Dict) -> Tuple[bool, s
 
 def rule_spend_cap(action: str, txn, customer_state: Dict) -> Tuple[bool, str]:
     """
-    Ek customer ko din mein N se zyada CONTACT nahi (over-contact guard).
+    A customer cannot be contacted more than N times per day (over-contact guard).
 
-    Kaunse actions ginte hain ye config.CONTACT_ACTIONS decide karta hai —
-    silent retry jaan-boojh kar bahar hai (customer ko dikhta hi nahi; uska
-    apna cap NPCI 1+3 hai). Poora reasoning config.py mein likha hai.
+    Which actions count is decided by config.CONTACT_ACTIONS — a silent retry
+    is deliberately excluded (the customer never sees it; it has its own cap,
+    NPCI 1+3). The full reasoning is in config.py.
     """
     attempts_today = customer_state.get("attempts_today", 0)
     capped = (config.CONTACT_ACTIONS if config.SPEND_CAP_COUNTS_CONTACTS_ONLY

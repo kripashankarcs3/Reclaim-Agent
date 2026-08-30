@@ -204,13 +204,18 @@ export default function CaseTimeline({ caseData, loading, error }) {
 
   return (
     <section className="panel timeline-panel" aria-label="Case audit timeline">
-      <div className="panel__head">
-        <h2>
-          Case Audit Timeline <span className="mono panel__head-id">{caseData.txn_id}</span>
-        </h2>
-        <span className={`source-tag source-tag--${caseData.source}`}>
-          {caseData.source === "live" ? "LIVE" : "BATCH"}
-        </span>
+      <div className="panel__head panel__head--stacked">
+        <div className="panel__head-row">
+          <h2>
+            Case Audit Timeline <span className="mono panel__head-id">{caseData.txn_id}</span>
+          </h2>
+          <span className={`source-tag source-tag--${caseData.source}`}>
+            {caseData.source === "live" ? "LIVE" : "BATCH"}
+          </span>
+        </div>
+        <p className="panel__hint-line">
+          AI proposes · the policy gate decides — refused steps in red
+        </p>
       </div>
       <ol className="stage-stepper">
         {caseData.timeline.map((entry, i) => (
