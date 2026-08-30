@@ -8,8 +8,6 @@ Deterministic (seed=42) taaki demo kabhi stall/change na ho.
 import random
 from models import Transaction
 
-random.seed(42)
-
 # Real error codes Razorpay official list se (fake na lage)
 _SOFT = ["GATEWAY_ERROR", "payment_timeout", "gateway_timeout", "SERVER_ERROR"]
 _HARD = ["insufficient_funds", "card_declined", "invalid_vpa", "card_expired"]
@@ -47,6 +45,20 @@ def _mk(i, **kw):
 
 
 def generate():
+    """
+    54-txn deterministic batch.
+
+    random.seed() YAHAN, har call ke shuru mein — module-level par NAHI. Wajah:
+    module-level seed sirf PEHLI baar `import seed` hone par chalta, uske baad
+    kabhi nahi. Ek short-lived CLI process (`python run_batch.py`) mein farak
+    nahi padta kyunki har invocation apna fresh process/fresh import hai. Par
+    ek LONG-LIVED process (dashboard ka uvicorn server) mein generate() baar
+    baar call hota hai — aur module-level seed ke saath doosri call teesri
+    call sab EK HI advancing random stream se draw karti, har baar ALAG
+    (non-deterministic) batch deti. Ye bug tha jab tak dashboard API (Phase 7)
+    ne pehli baar generate() ko EK PROCESS mein DO baar call nahi kiya.
+    """
+    random.seed(42)
     txns = []
     i = 0
 

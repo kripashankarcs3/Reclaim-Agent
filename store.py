@@ -247,6 +247,22 @@ class Store:
             ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
+    def list_cases(self) -> List[tuple]:
+        """
+        Har DISTINCT (txn_id, order_id) jo audit_log mein kabhi likha gaya —
+        pehli baar dikhne ke order mein. Dashboard ke liye: batch kabhi is
+        store ko chhoo hi nahi (:memory: apna alag hota hai), isliye yahan jo
+        bhi txn_id hai wo DEFINITION SE ek real webhook delivery hai.
+
+        Read-only hai — koi write path nahi, koi core logic nahi badalta.
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT txn_id, order_id, MIN(id) AS first_id FROM audit_log"
+                " GROUP BY txn_id ORDER BY first_id ASC"
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
     def audit_all(self) -> List[AuditEntry]:
         with self._lock:
             rows = self.conn.execute(
