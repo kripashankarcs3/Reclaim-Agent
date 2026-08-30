@@ -219,15 +219,34 @@ the cap resets daily rather than on restart. Proven across five separate process
   unchanged. Gating the LLM behind an explicit flag restores the deterministic,
   zero-network default.
 
+### The live webhook, verified against a real Razorpay delivery (Phase 5, Half B)
+Not a synthetic test client this time — an actual `payment.failed` webhook, sent by
+Razorpay's test-mode dashboard through a real ngrok tunnel to a running `uvicorn`
+process, signature and all:
+
+- **Order `order_TVjM9UdH92ABNR`, error code `BAD_REQUEST_ERROR`.** The agent diagnosed
+  it `hard` and proposed `payment_link` — the same proposal `run_batch.py` would make for
+  this error code offline.
+- **The gate refused it.** The delivery landed at 02:49 — outside the 8 AM–7 PM contact
+  window — so `policy_engine.check()` returned `CONTACT_WINDOW` and the case was routed to
+  `human_review`, exactly as `--demo-hour 21` demonstrates offline. `/webhook` returned
+  HTTP 200 with that delivery's audit entries, not a queued/best-effort ack.
+- **This is the whole architecture's real proof.** Same signature-verified request, same
+  `order_id`-keyed store, same `policy_engine.check()`, same refusal — running against
+  Razorpay's actual webhook delivery instead of a hand-built HMAC in a test script. No
+  code changed to make this work; Half A's implementation was correct as committed. Half
+  B was purely standing up `uvicorn` + `ngrok` and registering the URL in the dashboard.
+
 ## Build order (what's done vs next)
 Done (runnable spine): DB models · 54-txn seed w/ ground truth · **policy engine** ·
 diagnoser · decider · audit log · metrics · batch harness · mocked notifications ·
 **gate-produced refusals + two-step compliant escalation + separately-gated nudges** ·
 **real Razorpay test-mode executor behind a `dry_run` seam (`--live`)** ·
 **`pipeline.py` shared flow** · **`agent.py` LangGraph loop (`handle_event`)** ·
-**`store.py` SQLite persistence (attempt history + daily contact tally)**.
-Next: `main.py` webhook (signature verify + `x-razorpay-event-id` idempotency) ·
-audit-log persistence · React dashboard (audit timeline = the star panel).
+**`store.py` SQLite persistence (attempt history + daily contact tally)** ·
+**`main.py` webhook (signature verify + `x-razorpay-event-id` idempotency),
+live-verified against a real Razorpay test-mode delivery**.
+Next: audit-log persistence · React dashboard (audit timeline = the star panel).
 
 **Known gap, stated plainly:** the audit log is still in-memory, so on the webhook path
 a restart loses prior timelines. Enforcement needed the attempt history, not the
