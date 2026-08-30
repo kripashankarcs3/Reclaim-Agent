@@ -101,14 +101,16 @@ def detect(st, ctx: Ctx) -> None:
     # likhta — timeline ka shape waisa hi rehna chahiye jo pehle tha.
     ctx.hydrate(txn)
     ctx.log.log(txn.id, "detect", {"status": txn.status, "amount": txn.amount,
-                                   "error_code": txn.error_code})
+                                   "error_code": txn.error_code},
+                order_id=txn.order_id)
 
 
 def diagnose(st, ctx: Ctx) -> None:
     """Label deterministic (classify); explanation sirf prose."""
     txn = st["txn"]
     label, explanation = diagnoser.diagnose(txn)
-    ctx.log.log(txn.id, "diagnose", {"label": label, "explanation": explanation})
+    ctx.log.log(txn.id, "diagnose", {"label": label, "explanation": explanation},
+                order_id=txn.order_id)
     st["label"], st["explanation"] = label, explanation
 
 
@@ -116,7 +118,7 @@ def decide(st, ctx: Ctx) -> None:
     """PROPOSE only — deliberately naive, see decider.py."""
     txn = st["txn"]
     proposed = decider.propose(txn, st["label"])
-    ctx.log.log(txn.id, "decide", {"proposed_action": proposed})
+    ctx.log.log(txn.id, "decide", {"proposed_action": proposed}, order_id=txn.order_id)
     st["proposed_action"] = st["candidate"] = st["action"] = proposed
 
 
@@ -132,7 +134,7 @@ def gate(st, ctx: Ctx) -> None:
     else:
         detail = {"action": cand, "allowed": verdict["allowed"],
                   "failed_rules": verdict["reasons"]}
-    ctx.log.log(txn.id, "policy_check", detail)
+    ctx.log.log(txn.id, "policy_check", detail, order_id=txn.order_id)
 
     st["verdict"] = verdict
     st["failed_rules"] = st["failed_rules"] + list(verdict["failed_rules"])
@@ -156,7 +158,8 @@ def execute(st, ctx: Ctx) -> None:
     except Exception as exc:
         err = f"EXECUTOR_ERROR: {type(exc).__name__}: {exc}"
         ctx.log.log(txn.id, "execute_error",
-                    {"action": cand, "live": use_live, "error": err})
+                    {"action": cand, "live": use_live, "error": err},
+                    order_id=txn.order_id)
         st["action"], st["outcome"] = "human_review", "human_review"
         # Pehla execute -> reason replace; fallback ke baad -> append.
         st["reasons"] = (st["reasons"] + [err]) if st["fallback_used"] else [err]
@@ -168,7 +171,8 @@ def execute(st, ctx: Ctx) -> None:
     ctx.log.log(txn.id, "execute",
                 {"action": cand, "outcome": outcome,
                  "live": bool(artifact and artifact.get("live")),
-                 "artifact": artifact})
+                 "artifact": artifact},
+                order_id=txn.order_id)
     ctx.count_attempt(txn, cand)
     if cand == "retry":
         # Re-presentment ho gaya -> attempt history DB mein badhao, taaki agla
@@ -222,17 +226,19 @@ def nudge(st, ctx: Ctx) -> None:
                             customer_state=ctx.cust_state(txn))
     ctx.log.log(txn.id, "policy_check",
                 {"action": "nudge", "allowed": v["allowed"],
-                 "failed_rules": v["reasons"]})
+                 "failed_rules": v["reasons"]},
+                order_id=txn.order_id)
     if v["allowed"]:
         record = notifications.send(txn.customer_id, txn.amount, txn.order_id,
                                     link["short_url"], now=ctx.now,
                                     verbose=ctx.show_notifications)
-        ctx.log.log(txn.id, "notify", record)
+        ctx.log.log(txn.id, "notify", record, order_id=txn.order_id)
         ctx.count_attempt(txn, "nudge")
         st["nudge"] = {"status": "sent", "reasons": []}
     else:
         ctx.log.log(txn.id, "notify",
-                    {"suppressed": True, "reasons": v["reasons"]})
+                    {"suppressed": True, "reasons": v["reasons"]},
+                    order_id=txn.order_id)
         st["failed_rules"] = st["failed_rules"] + list(v["failed_rules"])
         st["nudge"] = {"status": "suppressed", "reasons": list(v["reasons"])}
 
@@ -249,7 +255,8 @@ def finalize(st, ctx: Ctx) -> None:
     ctx.log.log(txn.id, "outcome",
                 {"outcome": st["outcome"], "reasons": st["reasons"],
                  "escalated_from": st["escalated_from"],
-                 "escalation_kind": st["escalation_kind"]})
+                 "escalation_kind": st["escalation_kind"]},
+                order_id=txn.order_id)
 
 
 # --- ROUTES (dono entry points yahi predicates use karte hain) -----------------

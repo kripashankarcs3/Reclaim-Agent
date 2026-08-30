@@ -26,12 +26,26 @@ banta hai aur pehle touch par seed.py ki ground truth se khud bhar jata hai
 (hydrate ka insert branch). Isliye offline batch ka output bilkul waisa hi
 rehta hai; DB sirf webhook path ko durability deti hai.
 
-AUDIT: ye file audit log ko haath nahi lagati. Append-only invariant waisa hi.
+TEEN TABLE ho gaye (Phase 6.5):
+  audit_log         -> poora audit trail, ab yahan bhi. Har row ek INSERT hai —
+                       koi UPDATE ya DELETE path hai hi nahi (reset() bhi isse
+                       nahi chhuta, neeche dekho). txn_id aur order_id dono par
+                       index hai taaki timeline dono se query ho sake — order_id
+                       isliye zaroori hai kyunki Razorpay har re-presentment par
+                       naya payment id deta hai, to poore CASE (order) ki history
+                       chahiye ho to txn_id akela kaafi nahi.
+
+AUDIT.py isi table se hokar guzarta hai jab AuditLog(store=...) banaya jata hai
+(agent.py aisa karta hai). run_batch.py AuditLog() bina store ke banata hai — to
+batch pehle jaisa hi pure in-memory rehta hai, is phase se bilkul anchhua.
 """
+import json
 import sqlite3
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
+
+from models import AuditEntry
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS txn_state (
@@ -50,6 +64,16 @@ CREATE TABLE IF NOT EXISTS customer_attempts (
     attempts    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (customer_id, day)
 );
+CREATE TABLE IF NOT EXISTS audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    txn_id     TEXT    NOT NULL,
+    order_id   TEXT,
+    stage      TEXT    NOT NULL,
+    detail     TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_txn_id   ON audit_log(txn_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_order_id ON audit_log(order_id, id);
 """
 
 
@@ -174,6 +198,78 @@ class Store:
             self.conn.commit()
         return self.attempts_today(customer_id, day)
 
+    # --- audit log (append-only, Phase 6.5) ------------------------------------
+
+    def append_audit(self, txn_id: str, order_id: Optional[str], stage: str,
+                     detail: dict) -> None:
+        """
+        EKMATRA write path is table ke liye. Sirf INSERT — koi UPDATE/DELETE
+        method exist hi nahi karta audit_log ke liye, isliye append-only
+        invariant CODE SE guarantee hai, convention se nahi.
+
+        default=str: agar kabhi koi non-JSON object (galti se) detail mein aa
+        jaye, to webhook crash na ho — string ban jaye, chup na ho.
+        """
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO audit_log (txn_id, order_id, stage, detail, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (txn_id, order_id, stage, json.dumps(detail, default=str), _stamp()),
+            )
+            self.conn.commit()
+
+    @staticmethod
+    def _row_to_entry(row) -> AuditEntry:
+        txn_id, stage, detail_json, created_at = row
+        return AuditEntry(txn_id=txn_id, stage=stage,
+                          detail=json.loads(detail_json), timestamp=created_at)
+
+    def audit_timeline(self, txn_id: str) -> List[AuditEntry]:
+        """Ek case ka poora timeline, TXN_ID se — insertion order mein (id ASC)."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT txn_id, stage, detail, created_at FROM audit_log"
+                " WHERE txn_id = ? ORDER BY id ASC",
+                (txn_id,),
+            ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
+    def audit_timeline_by_order(self, order_id: str) -> List[AuditEntry]:
+        """
+        Ek case ka poora timeline, ORDER_ID se — jab ek hi order ke multiple
+        payment ids (re-presentments) ki history saath dekhni ho.
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT txn_id, stage, detail, created_at FROM audit_log"
+                " WHERE order_id = ? ORDER BY id ASC",
+                (order_id,),
+            ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
+    def audit_all(self) -> List[AuditEntry]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT txn_id, stage, detail, created_at FROM audit_log ORDER BY id ASC"
+            ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
+    def audit_max_id(self) -> int:
+        """Watermark: is se pehle ki har row 'purani' hai. Delivery-scoping ke liye."""
+        with self._lock:
+            row = self.conn.execute("SELECT COALESCE(MAX(id), 0) FROM audit_log").fetchone()
+        return int(row[0])
+
+    def audit_since(self, after_id: int, txn_id: str) -> List[AuditEntry]:
+        """`after_id` ke BAAD is txn_id ke liye likhi gayi entries — ek delivery ka scope."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT txn_id, stage, detail, created_at FROM audit_log"
+                " WHERE id > ? AND txn_id = ? ORDER BY id ASC",
+                (after_id, txn_id),
+            ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
     # --- helpers ---------------------------------------------------------------
 
     def snapshot(self, order_id: str = None, customer_id: str = None,
@@ -193,7 +289,11 @@ class Store:
         return out
 
     def reset(self) -> None:
-        """SIRF test/demo ke liye. Audit log ko chhuta bhi nahi."""
+        """
+        SIRF test/demo ke liye — attempt history + tally + seen-events saaf.
+        audit_log ko JAAN-BOOJH KAR nahi chhuta: append-only ka matlab HAMESHA
+        append-only hai, admin/demo reset bhi isse delete nahi kar sakta.
+        """
         with self._lock:
             self.conn.execute("DELETE FROM txn_state")
             self.conn.execute("DELETE FROM customer_attempts")

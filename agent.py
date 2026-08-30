@@ -40,14 +40,17 @@ import store as store_mod
 from audit import AuditLog
 from models import Transaction
 
-# Ek hi append-only audit log + ek long-lived Ctx.
-# Phase 6: attempt history aur contact tally ab SQLite mein hain, isliye ye
+# Ek hi long-lived STORE, ek hi long-lived Ctx.
+# Phase 6: attempt history aur contact tally SQLite mein hain, isliye ye
 # process RESTART ke baad bhi zinda rehte hain — yahi wo gap tha jiski wajah se
 # live webhook har event ko "attempt #1" samajh leta aur NPCI 1+3 / spend cap
 # enforce hi nahi ho pate the.
+# Phase 6.5: AUDIT ab isi STORE se backed hai (AuditLog(store=STORE)), isliye
+# audit TIMELINES bhi restart ke baad zinda rehti hain — pehle ye poori tarah
+# bhool jati thi kyunki AuditLog() ek plain in-memory Python list thi.
 DB_PATH = os.getenv("RECLAIM_DB", "reclaim.db")
-AUDIT = AuditLog()
 STORE = store_mod.Store(DB_PATH)
+AUDIT = AuditLog(store=STORE)
 CTX = pipeline.Ctx(log=AUDIT, now=datetime.now(), store=STORE)
 
 
@@ -178,11 +181,12 @@ def handle_event(event: Dict[str, Any], now: datetime = None,
     txn = txn_from_event(event)
     CTX.now = now or datetime.now()
     CTX.live = live
-    # Audit append-only hai, isliye current lambai hi watermark ka kaam karti hai.
-    watermark = len(AUDIT.all())
+    # watermark()/entries_since() dono backing (in-memory ya store) ke liye
+    # kaam karte hain — AuditLog isi ke liye hai, yahan mode-specific code nahi.
+    watermark = AUDIT.watermark()
     GRAPH.invoke({"st": pipeline.new_state(txn)})
     return [{"stage": e.stage, "detail": e.detail}
-            for e in AUDIT.all()[watermark:] if e.txn_id == txn.id]
+            for e in AUDIT.entries_since(watermark, txn.id)]
 
 
 def case_timeline(txn_id: str) -> List[Dict[str, Any]]:
