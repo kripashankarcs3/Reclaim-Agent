@@ -1,0 +1,55 @@
+/*
+tokens.css — design tokens, dataviz skill ki validated dark palette se.
+
+Sirf yahan hex values hain — poora app inhe ROLE se use karta hai, raw hex
+kahin aur nahi likha jata. Status colors (good/warning/serious/critical)
+RESERVED hain — kisi series/category ke liye reuse nahi hote.
+*/
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --surface-0: #101010;   /* app background */
+  --surface-1: #1a1a19;   /* panel surface — skill's validated dark surface */
+  --surface-2: #232322;   /* raised card (hover, active row) */
+  --surface-3: #2c2c2a;   /* stepper card, input */
+  --border: #38382f;
+  --border-soft: #2a2a26;
+
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8b8a7f;
+
+  /* Status (reserved — never reused for series identity) */
+  --status-good: #0ca30c;
+  --status-good-bg: rgba(12, 163, 12, 0.14);
+  --status-warning: #fab219;
+  --status-warning-bg: rgba(250, 178, 25, 0.14);
+  --status-serious: #ec835a;
+  --status-serious-bg: rgba(236, 131, 90, 0.14);
+  --status-critical: #d03b3b;
+  --status-critical-bg: rgba(208, 59, 59, 0.16);
+
+  /* Categorical (dark steps, fixed order — soft/hard/abandoned/halted) */
+  --cat-1: #3987e5;   /* blue */
+  --cat-2: #d95926;   /* orange */
+  --cat-3: #199e70;   /* aqua */
+  --cat-4: #c98500;   /* yellow */
+
+  /* Sequential (blue ramp — policy fire-count magnitude) */
+  --seq-100: #cde2fb;
+  --seq-300: #6da7ec;
+  --seq-500: #256abf;
+  --seq-700: #0d366b;
+
+  /* Type */
+  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Rhythm */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --gap-page: 16px;
+}

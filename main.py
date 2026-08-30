@@ -44,6 +44,11 @@ Har dashboard endpoint apna khud ka `:memory:` store use karta hai (bilkul
 run_batch.run() jaisa) — durable webhook DB (`agent.STORE` / `reclaim.db`)
 kabhi likha nahi jata, sirf `agent.STORE` se LIVE cases padhe jaate hain.
 
+CORS (Phase 7 Half B): sirf Vite dev server ke origins allow hain, wildcard
+NAHI — ye backend ek webhook secret rakhta hai, isliye har origin ko API
+khol dena galat hoga. Ye sirf LOCAL DEV ke liye hai; production mein dashboard
+ko isi backend se serve karna behtar hoga (tab CORS ki zaroorat hi nahi).
+
 Run:
     uvicorn main:app --reload --port 8000
 Baad mein ngrok se expose karke Razorpay dashboard -> Webhooks (Test mode).
@@ -53,6 +58,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 import agent
 import config
@@ -61,6 +67,15 @@ import policy_engine
 import run_batch
 
 app = FastAPI(title="ReclaimAgent")
+
+# Sirf local Vite dev server — wildcard nahi, is backend ke paas webhook
+# secret hai. GET-only dashboard hai, par phir bhi origin scope karna sahi hai.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 # Sirf ye events recovery loop trigger karte hain.
 RECOVERY_EVENTS = {"payment.failed", "subscription.halted", "subscription.pending"}
