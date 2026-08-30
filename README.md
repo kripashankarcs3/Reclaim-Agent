@@ -243,12 +243,16 @@ diagnoser · decider · audit log · metrics · batch harness · mocked notifica
 **gate-produced refusals + two-step compliant escalation + separately-gated nudges** ·
 **real Razorpay test-mode executor behind a `dry_run` seam (`--live`)** ·
 **`pipeline.py` shared flow** · **`agent.py` LangGraph loop (`handle_event`)** ·
-**`store.py` SQLite persistence (attempt history + daily contact tally)** ·
+**`store.py` SQLite persistence (attempt history + daily contact tally + append-only
+audit log)** ·
 **`main.py` webhook (signature verify + `x-razorpay-event-id` idempotency),
 live-verified against a real Razorpay test-mode delivery**.
-Next: audit-log persistence · React dashboard (audit timeline = the star panel).
+Next: React dashboard (audit timeline = the star panel).
 
-**Known gap, stated plainly:** the audit log is still in-memory, so on the webhook path
-a restart loses prior timelines. Enforcement needed the attempt history, not the
-timelines — but this lands before the dashboard, or the star panel starts empty after
-every deploy.
+**Former known gap, now closed:** the audit log used to be in-memory, so a webhook
+restart lost every prior timeline. It is now append-only SQLite — `AuditLog(store=...)`
+writes through, and a fresh process reading the same DB file sees full history
+immediately, no reconstruction needed. `timeline_by_order()` returns a whole order's
+history across payment-id re-presentments, alongside the existing `txn_id`-keyed lookup.
+Proven across three separate processes: 10 entries written, read back cold by a new
+process, 6 more added, then a third process with no new event reads all 16.
