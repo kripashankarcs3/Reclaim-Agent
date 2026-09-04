@@ -1,0 +1,10 @@
+import { chromium } from "playwright";
+const [,, outPath, sel] = process.argv;
+const browser = await chromium.launch({ channel: "chrome" });
+const page = await browser.newPage({ viewport: { width: 1680, height: 1020 } });
+await page.goto("http://localhost:5173/", { waitUntil: "networkidle" });
+await page.waitForTimeout(800);
+const box = await page.locator(sel).boundingBox();
+await page.screenshot({ path: outPath, clip: { x: box.x, y: box.y, width: box.width, height: box.height + 250 } });
+await browser.close();
+console.log("saved", outPath);

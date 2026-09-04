@@ -1,6 +1,21 @@
 /*
 ui.jsx — chhote, reusable pieces. Koi business logic nahi, sirf presentation.
 */
+import {
+  IconSearch, IconActivity, IconGitBranch, IconShield, IconSend, IconBell,
+  IconFlag, IconAlertTriangle,
+} from "../icons.jsx";
+
+const STAGE_ICON = {
+  search: IconSearch, activity: IconActivity, gitBranch: IconGitBranch,
+  shield: IconShield, send: IconSend, bell: IconBell, flag: IconFlag,
+  alertTriangle: IconAlertTriangle,
+};
+
+export function StageIcon({ name, ...rest }) {
+  const Cmp = STAGE_ICON[name] || IconActivity;
+  return <Cmp {...rest} />;
+}
 
 export function StatusDot({ status }) {
   return <span className={`status-dot status-dot--${status}`} aria-hidden="true" />;
@@ -11,9 +26,15 @@ export function Badge({ tone = "neutral", children }) {
 }
 
 /* value + label ka contract — dataviz skill: "single current value -> stat tile" */
-export function StatTile({ label, value, sublabel, tone = "neutral", caption }) {
+export function StatTile({ label, value, sublabel, tone = "neutral", caption, icon, size }) {
+  const Icon = icon;
   return (
-    <div className={`stat-tile stat-tile--${tone}`}>
+    <div className={`stat-tile stat-tile--${tone} ${size ? `stat-tile--${size}` : ""}`}>
+      {Icon && (
+        <div className="stat-tile__icon">
+          <Icon size={16} />
+        </div>
+      )}
       <div className="stat-tile__label">{label}</div>
       <div className="stat-tile__value">{value}</div>
       {sublabel && <div className="stat-tile__sublabel">{sublabel}</div>}
@@ -32,6 +53,17 @@ export function MagnitudeBar({ value, max }) {
   );
 }
 
+export function SectionHeading({ icon, children, hint, standalone = false }) {
+  const Icon = icon;
+  return (
+    <div className={`section-heading ${standalone ? "section-heading--standalone" : ""}`}>
+      <span className="section-heading__icon">{Icon && <Icon size={15} />}</span>
+      <span className="section-heading__text">{children}</span>
+      {hint && <span className="section-heading__hint">{hint}</span>}
+    </div>
+  );
+}
+
 export function formatRs(amount) {
   if (amount === null || amount === undefined) return "—";
   return `₹${amount.toLocaleString("en-IN")}`;
@@ -42,6 +74,11 @@ export function outcomeTone(outcome) {
   if (outcome === "human_review") return "critical";
   if (outcome === "pending") return "warning";
   return "neutral";
+}
+
+const LABEL_HUMAN = { soft: "Transient", hard: "Hard decline", abandoned: "Abandoned", halted: "Halted" };
+export function labelHuman(label) {
+  return LABEL_HUMAN[label] || label || "—";
 }
 
 export function labelTone(label) {

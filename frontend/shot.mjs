@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const [,, outPath] = process.argv;
+const browser = await chromium.launch({ channel: "chrome" });
+const page = await browser.newPage({ viewport: { width: 1680, height: 1020 } });
+page.on("pageerror", (err) => console.error("[pageerror]", err.message));
+page.on("console", (msg) => { if (msg.type() === "error") console.error("[console]", msg.text()); });
+await page.goto("http://localhost:5173/", { waitUntil: "networkidle" });
+await page.waitForTimeout(1200);
+await page.screenshot({ path: outPath, fullPage: true });
+await browser.close();
+console.log("saved", outPath);
