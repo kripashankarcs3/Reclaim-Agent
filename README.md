@@ -1,58 +1,85 @@
-# ReclaimAgent — AI Revenue Recovery (Razorpay Buildathon, Track 03)
+# ReclaimAgent
 
-A closed-loop agent that watches a Razorpay merchant's payment stream, detects
-revenue at risk (failed payments, abandoned checkouts, halted subscriptions),
-**diagnoses** the root cause from Razorpay error codes, **decides** the cheapest
-*compliant* intervention, **gates** it through a deterministic policy engine,
-executes it, and proves how much money it recovered — with a full audit trail
-and an honest exception list.
+AI-powered revenue recovery for Razorpay payments, built for Razorpay Buildathon — Track 03.
 
-## Core design: propose–verify split
-> **The LLM PROPOSES. A deterministic policy engine DECIDES.**
-> The LLM never moves money. Every proposed action passes through
-> `policy_engine.check()` first; any rule failure = **blocked + logged with reason**.
+ReclaimAgent monitors failed payments and other revenue-at-risk events, identifies the likely cause, proposes a recovery action, and checks that action against a deterministic policy engine before anything is executed.
 
-This is the whole defense: judges will try to make the agent do something
-unsafe — the *runtime* (not the prompt) refuses.
+The key design principle is simple:
 
-**The proposer is deliberately naive.** `decider.py` proposes the cheapest
-*tempting* action — including ones that are plainly non-compliant (re-presenting a
-mandate after a hard NSF decline, debiting Rs.49,999 silently). It contains no
-amount, cap, or consent logic at all. That is on purpose: if the proposer refused
-first, the audit trail would show `policy_check: allowed=True` and "the runtime
-refuses" would be an empty claim. **Every refusal in this system is produced by
-`policy_engine.check()` and carries the failed rule names.**
+> **The LLM proposes. The policy engine decides.**
 
-When the gate blocks a debit, the agent tries the *compliant fallback* (a
-customer-initiated payment link) — which is itself re-proposed and re-gated, never
-waved through. If the fallback is also blocked, the case escalates to human review
-with every failed rule attached. Which blocks earn a fallback is itself
-rules-as-code (`config.FALLBACK_ELIGIBLE_RULES` / `HUMAN_ESCALATION_RULES`), not a
-judgement call: a spent mandate can still be paid by the customer, but if we are
-forbidden from *contacting* the customer at all, a link+nudge is exactly what we
-must not do.
+The model does not control payments or compliance decisions. Every action goes through `policy_engine.check()` and a blocked action is recorded with the rule that caused the refusal.
 
-## Run the winning spine (no keys, no network needed)
+---
+
+## What it does
+
+ReclaimAgent runs a transaction through a single recovery pipeline:
+
+1. **Detect** a payment or subscription at risk.
+2. **Diagnose** the failure using Razorpay error information.
+3. **Decide** on a proposed recovery action.
+4. **Gate** the proposal through deterministic rules.
+5. **Execute** an allowed action.
+6. **Fallback** to a customer-initiated payment link when appropriate.
+7. **Nudge** the customer only after a separate messaging-policy check.
+8. **Escalate** to human review when no compliant automated route remains.
+9. **Audit** every stage.
+
+The same pipeline is used by both the offline batch runner and the webhook/LangGraph path, so the two entry points do not maintain separate business logic.
+
+---
+
+## Why the propose–verify split matters
+
+The proposer is intentionally not responsible for safety rules. It can suggest an action that should ultimately be rejected.
+
+For example, it may propose a retry even when:
+
+- the retry cap has already been reached,
+- the failure is a hard decline,
+- additional authentication is required, or
+- the transaction has no mandate that can legally be re-presented.
+
+The policy engine is responsible for making that decision.
+
+If an action is blocked, the failure is logged with the relevant rule names. If a debit is blocked, the system can propose a customer-initiated `payment_link`, but that fallback is also sent through the policy engine. A fallback can therefore be blocked as well, in which case the case is escalated to `human_review`.
+
+This keeps compliance logic in code instead of relying on an LLM prompt.
+
+---
+
+## Quick start
+
+The default demo is completely offline. No Razorpay credentials or network access are required.
+
 ```bash
-python run_batch.py                    # full 54-txn batch -> metrics + exception list
-python run_batch.py --demo-hour 21     # force 9 PM -> contact-window blocks
-python run_batch.py --show-timeline txn_046   # the 3-rule gate block (star case)
-python run_batch.py --show-notifications      # print every mocked TRAI template
+python run_batch.py
 ```
 
-Optional live mode (needs `pip install razorpay` + `rzp_test_` keys in `.env`):
+Useful demo commands:
+
 ```bash
-python executor.py --ping              # read-only payment.all(); creates nothing
-python run_batch.py --live             # ONE real test-mode payment link, rest simulated
-python run_batch.py --live --live-limit 0   # all 33 links real (slow; not for the demo)
-```
-Without `--live` the spine makes **zero network calls** and needs no keys at all.
+# Run the full 54-transaction batch
+python run_batch.py
 
-**The star case — txn_046** (Rs.25,000, subscription, `insufficient_funds`, mandate
-already re-presented 3x). The agent *proposes the retry*; the gate stacks three
-refusals on it and routes it to a human:
+# Simulate a 9 PM run to exercise contact-window rules
+python run_batch.py --demo-hour 21
 
+# Inspect the timeline for the main policy-block case
+python run_batch.py --show-timeline txn_046
+
+# Show all mocked notification templates
+python run_batch.py --show-notifications
 ```
+
+### Example: policy-gated recovery
+
+`txn_046` is a ₹25,000 subscription payment with `insufficient_funds`, where the mandate has already been re-presented three times.
+
+The agent can propose a retry, but the policy engine rejects it because multiple independent rules apply:
+
+```text
 [decide      ] proposed_action: retry
 [policy_check] action: retry  allowed: False
                RETRY_CAP: NPCI 1+3 cap exhausted (4/4 attempts used)
@@ -61,198 +88,292 @@ refusals on it and routes it to a human:
 [outcome     ] human_review
 ```
 
-## How this hits every element of Track 03's bar
-| Judge bar element | Where it lives |
-|---|---|
-| ✅ Explainable | `audit.py` per-case timeline + `diagnoser.explain()` |
-| ✅ Bounded / Gated | `policy_engine.py` (rules-as-code, LLM can't override) |
-| ✅ Compliant escalation | gate-blocked debit → re-gated `payment_link` → else `human_review` |
-| ✅ Stopping rules | RETRY_CAP (NPCI 1+3) + HARD_DECLINE halt in `policy_engine.py` |
-| ✅ Metrics that measure only what is really possible | `MANDATE_REQUIRED` — no mandate, no silent retry, no "recovery" |
-| ✅ Channel compliance actually exercised | `nudge` is a **separately gated** action → `notifications.py` |
-| ✅ Audit trail | `audit.py` — append-only `AuditEntry` per stage |
-| ✅ Measured money recovered across a batch | `metrics.py` over 50+ synthetic txns — **recovered and actioned reported separately** |
-| ✅ Honest metrics + false-positive cost | `metrics.py` (precision, FP cost, exception list) |
-| ✅ One failure handled gracefully | the policy BLOCK moment (9 PM / >₹15k / hard decline) |
+---
 
-## Compliance rules encoded (interview ammunition — see `config.py`)
-- **NPCI 1 + 3 retry cap** (max 4 attempts, effective 1 Aug 2025)
-- **RBI ₹15,000 AFA threshold** (E-mandate Framework, 2026; ₹1,00,000 for MF/insurance/CC)
-- **RBI 24-hour pre-debit notification**
-- **RBI 8 AM–7 PM contact window** (fair-practices; used as safe default)
-- **TRAI TCCCPR** transactional template + 90-day opt-out cooldown
-- **Per-customer spend cap** (over-contact guard)
+## Live Razorpay test mode
+
+Live integration is optional and deliberately limited to Razorpay test mode.
+
+Install the SDK:
+
+```bash
+pip install razorpay
+```
+
+Configure test credentials in `.env` and then:
+
+```bash
+# Read-only connectivity check
+python executor.py --ping
+
+# Create one real test-mode payment link; everything else stays simulated
+python run_batch.py --live
+
+# Create real links for the full set
+python run_batch.py --live --live-limit 0
+```
+
+Without `--live`, the application makes **zero network calls**.
+
+The executor refuses `rzp_live_` keys, so the repository cannot be used against a live Razorpay account.
+
+Retries remain simulated even in `--live`; the only real external operation is payment-link creation.
+
+---
 
 ## Architecture
 
-**Two entry points, one pipeline.** `run_batch.py` (offline batch) and `agent.py`
-(one event, LangGraph) both drive `pipeline.py` — the single implementation of a
-transaction's flow. Neither entry point contains business logic, so the batch path and
-the webhook path cannot drift apart.
+There are two entry points, but only one transaction pipeline:
 
-| module | role |
-|---|---|
-| `pipeline.py` | ⭐ single source of truth: `STEPS` (detect/diagnose/decide/gate/execute/fallback/nudge/escalate/finalize) + `ROUTES` (the escalation predicates) + `Ctx` |
-| `run_batch.py` | thin loop — 54 seeded txns through `pipeline.process_txn()` |
-| `agent.py` | thin LangGraph graph — nodes wrap `pipeline.STEPS`, conditional edges wrap `pipeline.ROUTES`; exposes `handle_event(event)` |
-| `store.py` | SQLite: attempt history (`order_id`) + daily contact tally (`customer_id`, `day`) |
-| `policy_engine.py` | the gate. Every refusal in the system comes from here |
-| `executor.py` | the only module that talks to Razorpay (`dry_run` seam) |
-
-`agent.py`'s graph has a **cycle back into `gate`**: a fallback physically cannot reach
-`execute` without being re-gated. The routing is the graph, not an `if/else`.
-
+```text
+                 ┌──────────────────┐
+                 │  Webhook / Batch │
+                 └────────┬─────────┘
+                          │
+                       detector
+                          │
+                       diagnoser
+                          │
+                   decider / LLM
+                  (proposes action)
+                          │
+                          ▼
+                ┌───────────────────┐
+                │   Policy Engine   │
+                │     (decides)     │
+                └─────────┬─────────┘
+                    ┌─────┴─────┐
+                 allowed      blocked
+                    │             │
+                 executor      fallback
+                    │          payment_link
+                  audit             │
+                    │          policy check
+                    │          ┌────┴────┐
+                    │       allowed   blocked
+                    │          │          │
+                    │       executor   human_review
+                    │
+                    └── payment link created?
+                              │
+                         nudge proposal
+                              │
+                        policy check
+                         ┌────┴────┐
+                      allowed   blocked
+                         │          │
+                  notification    audit
 ```
-[webhook/batch] -> detector -> diagnoser (label + LLM explanation)
-   -> decider (PROPOSE the cheapest tempting action — no safety logic here)
-   -> policy_engine.check (DECIDE)
-        ├── allowed -> executor -> audit(execute)
-        │                └─ link created? -> nudge is a SEPARATE proposal
-        │                     -> policy_engine.check("nudge")   <- TRAI + window
-        │                          ├── allowed -> notifications (mock template) -> audit
-        │                          └── blocked -> audit(suppressed + reason)
-        └── blocked -> audit(failed rules)
-                 -> compliant fallback (payment_link) -> policy_engine.check AGAIN
-                      ├── allowed -> executor -> audit(escalated_from: retry)
-                      └── blocked -> human_review + every failed rule
+
+### Core modules
+
+| Module | Responsibility |
+| --- | --- |
+| `pipeline.py` | Single source of truth for the transaction flow, steps, routes and context |
+| `run_batch.py` | Runs the seeded transaction batch |
+| `agent.py` | LangGraph entry point; wraps the same pipeline steps and routes |
+| `detector.py` | Identifies revenue-at-risk transactions |
+| `diagnoser.py` | Classifies failures and provides explanations |
+| `decider.py` | Proposes a recovery action |
+| `policy_engine.py` | Deterministic safety and compliance gate |
+| `executor.py` | Only module that communicates with Razorpay |
+| `store.py` | SQLite persistence for attempts, contacts and audit history |
+| `audit.py` | Append-only audit entries and transaction timelines |
+| `metrics.py` | Recovery, actioned-value, precision and false-positive metrics |
+| `notifications.py` | Mocked customer notification path |
+
+---
+
+## Compliance rules
+
+The policy engine currently encodes the following rules:
+
+- **NPCI 1+3 retry cap** — maximum four attempts.
+- **RBI ₹15,000 AFA threshold** — silent debit is not allowed above the configured threshold.
+- **RBI 24-hour pre-debit notification**.
+- **8 AM–7 PM contact window** used as the safe contact-window rule.
+- **TRAI TCCCPR messaging checks**, including transactional templates and opt-out handling.
+- **Per-customer contact/spend cap** to prevent repeated customer contact.
+
+The important part is not only that these rules exist, but that they are evaluated at runtime. A proposed action cannot bypass them.
+
+---
+
+## Persistence and webhook handling
+
+Webhook events do not contain all the state needed for recovery decisions. In particular, retry history and pre-debit notification state are maintained by the application.
+
+`store.py` persists:
+
+- retry/attempt history by `order_id`,
+- daily customer contact counts,
+- append-only audit entries.
+
+`order_id` is used for attempt history rather than payment ID because Razorpay can issue a new payment ID for a re-presentment while the order remains the same.
+
+The contact tally also includes the day in its key so that the daily cap resets by date rather than by process restart.
+
+The webhook path uses Razorpay's `x-razorpay-event-id` for idempotency and verifies webhook signatures before processing the event.
+
+---
+
+## Auditability
+
+Every important stage produces an audit entry.
+
+A transaction timeline can therefore show:
+
+```text
+detect
+  → diagnose
+  → decide
+  → policy_check
+  → execute / blocked
+  → fallback
+  → policy_check
+  → nudge
+  → escalate
+  → finalize
 ```
 
-Creating a payment link contacts nobody; *telling the customer about it* does. So the
-link and the nudge are two proposals with two independent gate checks — which is why
-`rule_trai_messaging` and the 8 AM–7 PM window are reachable at all.
+A blocked action records the failed policy rules instead of simply returning a generic error.
 
-**Why persistence had to land before the live webhook.** A Razorpay webhook payload
-contains neither `retry_count` nor `pre_debit_notice_sent` — those are our own state —
-and the contact tally used to live in an in-memory dict. So on the webhook path every
-event looked like attempt #1: NPCI 1+3 could never fire and the spend cap reset on every
-restart. The gate was right; it had nothing to count. `store.py` fixes that, keyed on
-**`order_id` rather than payment id** (Razorpay issues a new payment id per
-re-presentment while the order stays constant), with the **day inside the tally key** so
-the cap resets daily rather than on restart. Proven across five separate processes:
-`retry_count` climbs 0→1→2→3 and the fourth attempt is refused with
-`RETRY_CAP: NPCI 1+3 cap exhausted (4/4 attempts used)`.
+The audit log is persisted in SQLite, so the history survives process restarts and can be reconstructed across payment re-presentments using the order-level timeline.
 
-## Honest caveats (say these out loud — judges reward candor)
-- Notifications are **mocked** (template + compliance checks are real; nothing is sent).
-  They are wired into the executed path — 44 templates logged, 2 suppressed by TRAI
-  rules in the default run — but `notifications.send()` only ever logs.
-- **False-positive cost is 1, and we left it there.** txn_049 is a subscription whose
-  24-hour pre-debit notice was never sent. The gate correctly refuses the debit; the
-  agent falls back to a payment link and ends `pending`, while the seed's ground truth
-  says that case should have gone to a human. We think a customer-initiated link needs
-  no pre-debit notice, so the fallback is defensible — but the stricter reading is too,
-  so the ground truth was **not** edited to match our own output. A non-zero,
-  explicable FP is better evidence than a suspiciously clean zero.
-- **We cut our own headline number by 64% on purpose (Rs.18,188 -> Rs.6,497).**
-  Earlier, `soft` + non-subscription failures proposed a silent `retry` and "recovered"
-  — but a merchant cannot silently re-charge a one-time payment: there is no stored
-  mandate or token, so no debit API exists to call. Those rupees were never actually
-  recoverable; the number was inflated by construction. `rule_mandate_required` now
-  blocks `retry` on any txn without a mandate, and those cases escalate to a
-  customer-initiated payment link and end `pending`. **Every rupee in the recovery
-  figure is now mandate-backed and genuinely re-presentable.** The drop is a
-  correctness fix, not a regression — the old number measured something that could
-  not happen.
-- **Two numbers, never merged: recovered vs actioned.** *Recovered* (Rs.6,497, 3.1%)
-  means the customer actually paid. *At-risk actioned* (Rs.103,952, 49.5%) means we got
-  a compliant recovery path in front of the customer — 46 live payment links worth
-  Rs.97,455 — but **a link is not a payment until somebody pays it**, so that money is
-  reported as in-flight, not recovered. Folding the two together would re-create exactly
-  the inflation Phase 3.6 removed, so `metrics.py` computes and prints them as separate
-  lines and never sums them into one "recovery rate".
-- **No dead ends: every case exits with a route or a reason.** An allowed retry that
-  runs and still does not recover used to end `pending` with no link — the customer had
-  no way to pay and nothing was flagged. Those cases now fall through to a
-  customer-initiated payment link, **re-proposed and re-gated** like any other action.
-  The "pending with no link" line is 0 at 2 PM; at 9 PM the same five cases become
-  `human_review` carrying `CONTACT_WINDOW`, because a link we may not tell the customer
-  about is not a route. Two escalation kinds are counted separately so the labels stay
-  honest: *blocked debit -> link* (17) and *failed retry -> link* (5).
-- **"Contact" is defined in `config.py`, not assumed.** The per-customer cap exists to
-  stop us pestering a customer, so only what the customer can actually *see* counts
-  against it: a payment link (a payment request addressed to them) and a nudge (the
-  message itself). A `retry` is a silent backend re-presentment against a mandate —
-  no SMS, no screen, nothing the customer perceives — and it already has its own
-  stricter cap in NPCI 1+3, so counting it twice punished the customer-facing budget
-  for an invisible event. Concretely, it meant a failed retry could eat the budget
-  needed to tell the customer about the link we had just created, inverting the rule's
-  purpose. `SPEND_CAP_COUNTS_CONTACTS_ONLY` + `CONTACT_ACTIONS` carry that reasoning,
-  and both `rule_spend_cap` and the batch's tally read the same definition so they
-  cannot drift apart. The cap still bites where it should: `cust_repeat`'s third
-  same-day attempt is still refused (SPEND_CAP, 2 cases), and the only remaining
-  suppressed nudges are the two genuine TRAI cases (opt-out and no-consent).
-- Synthetic 54-txn batch drives deterministic outcomes so the demo never stalls.
+---
 
-### What the LIVE Razorpay calls actually returned (Phase 4, measured — not claimed)
-- **Standard Payment Links DO work in test mode.** Verified end to end: `payment_link
-  .create` returned a real, openable `short_url`, and `payment_link.fetch(id)` confirms
-  it server-side (`plink_TSltLVDkNcwer9` -> `https://rzp.io/rzp/Angyk9m`, amount 99900
-  paise = Rs.999, matching txn_016).
-- **UPI Payment Links are live-mode only — we did NOT test them and do not fake them.**
-  The demo is built on standard links precisely because they are the test-mode-supported
-  primitive. No UPI-link code path exists in this repo.
-- **Nothing is ever sent, verified server-side.** The created link comes back with
-  `notify: {email: False, sms: False, whatsapp: False}` and `reminder_enable: False`.
-  Razorpay would happily SMS/email the customer if those defaulted on — so the executor
-  sets them explicitly. (It also exposes a `whatsapp` channel the docs' two-field
-  example omits; it defaults off.)
-- **`payment.all()` returns 0 payments.** The test account has no payment history, so
-  none of the batch is drawn from live data — all 54 transactions are synthetic. A
-  payment link is not a payment until somebody pays it.
-- **`payment_link.all()` is not reliable here** — it returned an empty list despite
-  confirmed creations, then `BadRequestError: Too many requests`. `fetch(id)` is the
-  verification path we actually trust.
-- **Retries are simulated even under `--live`.** Only payment links are real; we never
-  fire an actual recurring debit. Deliberate scope, not an oversight.
-- **`--live` creates ONE real link by default** (`--live-limit 1`, `0` = all 33). A
-  33-call live run would be exactly the stalling demo the invariants forbid.
-- **`reference_id` carries a run-unique timestamp suffix** because Razorpay rejects
-  duplicates — so it is not yet a stable idempotency key. Real idempotency arrives in
-  Phase 5 via the webhook's `x-razorpay-event-id`.
-- **Live failures degrade to `human_review`, never to a fake link.** Any executor
-  exception is audited as `EXECUTOR_ERROR` and the case is routed to a human.
-- **The executor refuses `rzp_live_` keys outright.** This agent structurally cannot run
-  against a live account.
-- **LLM explanations are opt-in** (`RECLAIM_LLM_EXPLAIN=1`). Phase 4 introduced
-  `load_dotenv()`, which put `LLM_API_KEY` into the process env and silently
-  turned the offline batch into 54 network calls (measured: 0.25s -> 59s) with output
-  unchanged. Gating the LLM behind an explicit flag restores the deterministic,
-  zero-network default.
+## Metrics
 
-### The live webhook, verified against a real Razorpay delivery (Phase 5, Half B)
-Not a synthetic test client this time — an actual `payment.failed` webhook, sent by
-Razorpay's test-mode dashboard through a real ngrok tunnel to a running `uvicorn`
-process, signature and all:
+The project intentionally keeps **recovered** and **actioned** money separate.
 
-- **Order `order_TVjM9UdH92ABNR`, error code `BAD_REQUEST_ERROR`.** The agent diagnosed
-  it `hard` and proposed `payment_link` — the same proposal `run_batch.py` would make for
-  this error code offline.
-- **The gate refused it.** The delivery landed at 02:49 — outside the 8 AM–7 PM contact
-  window — so `policy_engine.check()` returned `CONTACT_WINDOW` and the case was routed to
-  `human_review`, exactly as `--demo-hour 21` demonstrates offline. `/webhook` returned
-  HTTP 200 with that delivery's audit entries, not a queued/best-effort ack.
-- **This is the whole architecture's real proof.** Same signature-verified request, same
-  `order_id`-keyed store, same `policy_engine.check()`, same refusal — running against
-  Razorpay's actual webhook delivery instead of a hand-built HMAC in a test script. No
-  code changed to make this work; Half A's implementation was correct as committed. Half
-  B was purely standing up `uvicorn` + `ngrok` and registering the URL in the dashboard.
+- **Recovered** means the customer actually paid.
+- **At-risk actioned** means the system created a compliant recovery path, such as a payment link. A link is not counted as recovered until the payment is actually made.
 
-## Build order (what's done vs next)
-Done (runnable spine): DB models · 54-txn seed w/ ground truth · **policy engine** ·
-diagnoser · decider · audit log · metrics · batch harness · mocked notifications ·
-**gate-produced refusals + two-step compliant escalation + separately-gated nudges** ·
-**real Razorpay test-mode executor behind a `dry_run` seam (`--live`)** ·
-**`pipeline.py` shared flow** · **`agent.py` LangGraph loop (`handle_event`)** ·
-**`store.py` SQLite persistence (attempt history + daily contact tally + append-only
-audit log)** ·
-**`main.py` webhook (signature verify + `x-razorpay-event-id` idempotency),
-live-verified against a real Razorpay test-mode delivery**.
-Next: React dashboard (audit timeline = the star panel).
+In the measured 54-transaction synthetic batch:
 
-**Former known gap, now closed:** the audit log used to be in-memory, so a webhook
-restart lost every prior timeline. It is now append-only SQLite — `AuditLog(store=...)`
-writes through, and a fresh process reading the same DB file sees full history
-immediately, no reconstruction needed. `timeline_by_order()` returns a whole order's
-history across payment-id re-presentments, alongside the existing `txn_id`-keyed lookup.
-Proven across three separate processes: 10 entries written, read back cold by a new
-process, 6 more added, then a third process with no new event reads all 16.
+- **₹6,497 recovered** (3.1%)
+- **₹103,952 at-risk actioned** (49.5%)
+- 46 live payment links represented ₹97,455 of the actioned amount.
+
+The distinction is important: combining these numbers would overstate actual revenue recovery.
+
+---
+
+## Current limitations
+
+The demo intentionally keeps several integrations conservative:
+
+- Notifications are mocked. Compliance checks and templates are exercised, but no SMS, email or WhatsApp message is sent.
+- Payment retries are simulated. The repository does not perform a real recurring debit.
+- The default batch uses 54 synthetic transactions rather than live merchant payment history.
+- Standard Razorpay Payment Links were verified in test mode. UPI Payment Links were not tested and are not implemented in this repository.
+- `payment_link.fetch(id)` is used as the verification path for created links.
+- The default live run creates one real test-mode payment link to keep demos predictable.
+- LLM explanations are opt-in with `RECLAIM_LLM_EXPLAIN=1`; the default batch remains deterministic and offline.
+
+These limitations are deliberate. The system does not claim a recovery, API call, or customer notification that it did not actually perform.
+
+---
+
+## Verified Razorpay test-mode behavior
+
+The live integration was tested against Razorpay's test environment.
+
+Verified behavior includes:
+
+- Standard Payment Link creation returning a real `short_url`.
+- Server-side verification of a created link using `payment_link.fetch(id)`.
+- Explicitly disabling Razorpay's email, SMS and WhatsApp notification flags when creating the link.
+- Test-account payment history containing no payments, so the batch remains synthetic.
+- Live executor failures degrading to `human_review` rather than producing a fake recovery result.
+- The executor rejecting `rzp_live_` credentials.
+
+The webhook path was also verified against an actual Razorpay test-mode `payment.failed` delivery through a running `uvicorn` service and ngrok tunnel. The request was signature-verified and passed through the same policy engine and persistent store used by the normal pipeline.
+
+---
+
+## Example: graceful escalation
+
+When an automated debit is blocked, the system does not stop at the first refusal.
+
+The route is:
+
+```text
+blocked debit
+    ↓
+propose payment_link
+    ↓
+policy check again
+    ├── allowed → create link → separately gate customer nudge
+    └── blocked → human_review
+```
+
+This matters because creating a payment link and contacting the customer are different actions. A link can exist without a message being sent, so messaging rules are evaluated separately.
+
+---
+
+## Project status
+
+### Completed
+
+- SQLite data models and persistence
+- 54-transaction deterministic seed with ground truth
+- Detection and diagnosis
+- Recovery decision layer
+- Deterministic policy engine
+- Audit log and transaction timelines
+- Recovery and false-positive metrics
+- Batch demo harness
+- Mocked notifications
+- Two-step compliant escalation
+- Separately gated customer nudges
+- Razorpay test-mode executor behind a `dry_run` seam
+- Shared `pipeline.py` transaction flow
+- LangGraph `agent.py` entry point
+- Persistent retry history and daily contact tally
+- Webhook signature verification
+- `x-razorpay-event-id` idempotency
+- Live verification against a Razorpay test-mode webhook delivery
+
+### Next
+
+- React dashboard
+- Audit timeline as the primary review interface
+
+---
+
+## Repository structure
+
+```text
+.
+├── agent.py
+├── audit.py
+├── config.py
+├── decider.py
+├── diagnoser.py
+├── detector.py
+├── executor.py
+├── metrics.py
+├── notifications.py
+├── pipeline.py
+├── policy_engine.py
+├── run_batch.py
+├── store.py
+└── main.py
+```
+
+---
+
+## Design principles
+
+A few decisions are intentional throughout the project:
+
+1. **Business-critical safety rules live in code.**
+2. **LLM output is treated as a proposal, never as authority.**
+3. **Every fallback is re-evaluated by the same policy engine.**
+4. **Customer contact and backend payment actions are treated as different actions.**
+5. **Recovered money is never mixed with money merely placed on a recovery path.**
+6. **Audit history is persistent rather than process-local.**
+7. **The system prefers an explicit human-review outcome over an unsafe or unverifiable automated action.**
+
+The goal is not to maximize the number of automated retries. It is to recover revenue where the system can do so **legitimately, explainably and measurably**.
