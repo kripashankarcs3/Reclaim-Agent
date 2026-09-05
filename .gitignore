@@ -7,6 +7,7 @@ __pycache__/
 frontend/node_modules/
 *.log
 package-lock.json
+frontend/*.png
 
 # Internal planning / strategy docs (not for public GitHub)
 AGENTS.md
