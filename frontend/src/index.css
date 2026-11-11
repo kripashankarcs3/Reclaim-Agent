@@ -65,6 +65,15 @@ button { font: inherit; color: inherit; }
 
 .app-header__status { display: flex; align-items: center; gap: 18px; }
 
+.theme-toggle {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent-dim); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .app-header__last-event { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: 12.5px; }
 .app-header__event-icon { color: var(--status-good); }
 

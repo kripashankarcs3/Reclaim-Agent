@@ -73,3 +73,50 @@ RESERVED hain — kisi series/category ke liye reuse nahi hote.
   --dur-fast: 120ms;
   --dur-med: 220ms;
 }
+
+/* ---------- LIGHT THEME ----------
+   Sirf colors override hote hain (roles same). Status/categorical ke light
+   steps thode GAHRE hain, kyunki white surface pe text ke roop mein bhi padhne
+   layak contrast chahiye — dark theme wale bright tones white pe fade ho jate. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --surface-0: #f4f3ef;
+  --surface-1: #ffffff;
+  --surface-2: #f8f7f4;
+  --surface-3: #ecebe6;
+  --border: #dad9d2;
+  --border-soft: #e8e7e1;
+
+  --text-primary: #16160f;
+  --text-secondary: #4a4943;
+  --text-muted: #77766d;
+
+  --status-good: #0b7a0b;
+  --status-good-bg: rgba(11, 122, 11, 0.10);
+  --status-warning: #a36800;
+  --status-warning-bg: rgba(214, 140, 0, 0.13);
+  --status-serious: #b8501f;
+  --status-serious-bg: rgba(200, 90, 40, 0.11);
+  --status-critical: #c02a2a;
+  --status-critical-bg: rgba(208, 59, 59, 0.09);
+
+  --cat-1: #2a6fc9;
+  --cat-2: #c94f1c;
+  --cat-3: #13855e;
+  --cat-4: #b57800;
+
+  --seq-100: #dbe9fb;
+  --seq-300: #3f86dc;
+  --seq-500: #1f5fb0;
+  --seq-700: #0d366b;
+
+  --accent: #5b4fd1;
+  --accent-bg: rgba(91, 79, 209, 0.09);
+  --accent-dim: #8a80e0;
+
+  --shadow-sm: 0 1px 2px rgba(20, 20, 10, 0.06), 0 1px 3px rgba(20, 20, 10, 0.04);
+  --shadow-md: 0 4px 16px rgba(20, 20, 10, 0.08);
+  --shadow-lg: 0 12px 40px rgba(20, 20, 10, 0.12);
+  --shadow-glow-accent: 0 0 0 1px rgba(91, 79, 209, 0.25), 0 8px 32px rgba(91, 79, 209, 0.08);
+}

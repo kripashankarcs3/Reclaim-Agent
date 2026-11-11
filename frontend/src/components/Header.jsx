@@ -1,5 +1,23 @@
-import { IconZap, IconShield } from "../icons.jsx";
+import { useState } from "react";
+import { IconZap, IconShield, IconSun, IconMoon } from "../icons.jsx";
 import { StatusDot } from "./ui.jsx";
+import { applyTheme } from "../theme.js";
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || "dark");
+  const next = theme === "dark" ? "light" : "dark";
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={() => { applyTheme(next, true); setTheme(next); }}
+      aria-label={`Switch to ${next} theme`}
+      title={`Switch to ${next} theme`}
+    >
+      {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
+    </button>
+  );
+}
 
 export default function Header({ webhookConfigured, lastLiveCase }) {
   return (
@@ -31,6 +49,8 @@ export default function Header({ webhookConfigured, lastLiveCase }) {
           <StatusDot status={webhookConfigured ? "good" : "warning"} />
           {webhookConfigured ? "Webhook live-capable" : "Webhook secret not set"}
         </span>
+
+        <ThemeToggle />
       </div>
     </header>
   );
