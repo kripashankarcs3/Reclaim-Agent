@@ -324,6 +324,67 @@ button { font: inherit; color: inherit; }
 .by-cause__fill { height: 100%; border-radius: 999px; }
 .by-cause__value { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
 
+/* ---------- batch control (Run batch) ---------- */
+
+.batch-control { padding: 10px 18px 2px; display: flex; flex-direction: column; gap: 6px; }
+.batch-control__row { display: flex; gap: 8px; align-items: center; }
+.batch-control__status { font-size: 10.5px; color: var(--text-muted); line-height: 1.4; }
+.batch-control__status.is-error { color: var(--status-critical); }
+
+.segmented { display: inline-flex; flex: 1; padding: 2px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border-soft); }
+.segmented__opt {
+  flex: 1; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer;
+  font: 600 11.5px var(--font-ui); padding: 5px 8px; border-radius: 999px; white-space: nowrap;
+}
+.segmented__opt.is-active { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+.segmented__opt:focus-visible, .run-batch-btn:focus-visible, .exc-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.run-batch-btn {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; cursor: pointer;
+  border: 0; border-radius: 999px; padding: 7px 14px;
+  background: var(--accent); color: #fff; font: 700 12px var(--font-ui);
+  transition: filter var(--dur-fast) var(--ease);
+}
+.run-batch-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.run-batch-btn:disabled, .segmented__opt:disabled { opacity: 0.6; cursor: progress; }
+
+/* ---------- exception list ---------- */
+
+/* Metrics panel khud scroll karta hai — uske andar koi section shrink na ho
+   (overflow wali list flex column mein warna 0 height pe dab jaati hai). */
+.metrics-panel > * { flex-shrink: 0; }
+.metrics-note { margin: 2px 18px 4px; font-size: 10.5px; color: var(--text-muted); }
+.exc-empty { margin: 4px 18px 0; font-size: 11.5px; color: var(--status-good); }
+.exc-list { list-style: none; margin: 0; padding: 0 18px; display: flex; flex-direction: column; gap: 5px; max-height: 248px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.exc-item {
+  width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--status-critical); border-radius: var(--radius-sm);
+  padding: 7px 10px; display: flex; flex-direction: column; gap: 5px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.exc-item:hover { border-color: var(--accent-dim); border-left-color: var(--status-critical); }
+.exc-item__top { display: flex; align-items: center; gap: 6px; }
+.exc-item__id { font-size: 11.5px; color: var(--text-primary); font-weight: 600; }
+.exc-item__label { font-size: 10.5px; color: var(--text-muted); }
+.exc-item__amount { margin-left: auto; font-size: 11.5px; color: var(--text-secondary); }
+.exc-item .outcome-chip { font-size: 9.5px; padding: 2px 7px; }
+.exc-item__rules { display: flex; flex-wrap: wrap; gap: 4px; }
+.exc-rule { font-size: 10px; padding: 2px 7px; border-radius: 5px; color: var(--status-critical); background: var(--status-critical-bg); }
+
+/* ---------- recovery by intervention ---------- */
+
+.by-int { padding: 3px 18px 0; display: flex; flex-direction: column; gap: 6px; }
+.by-int__legend { display: flex; gap: 10px; font-size: 10px; color: var(--text-muted); }
+.by-int__legend span { display: inline-flex; align-items: center; gap: 4px; }
+.by-int__legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.by-int__top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+.by-int__label { font-size: 11px; color: var(--text-secondary); }
+.by-int__value { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.by-int__rec { color: var(--status-good); }
+.by-int__track { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-3); gap: 1px; }
+.by-int__track > div { height: 100%; }
+
 /* ---------- policy console ---------- */
 
 .policy-console { flex-shrink: 0; }

@@ -55,10 +55,12 @@ Baad mein ngrok se expose karke Razorpay dashboard -> Webhooks (Test mode).
 """
 import json
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 import agent
 import config
@@ -73,7 +75,8 @@ app = FastAPI(title="ReclaimAgent")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET"],
+    # POST sirf /api/run-batch ke liye — wo bhi synthetic dry-run batch hai.
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -159,14 +162,44 @@ def health():
 # DASHBOARD API (Phase 7, Half A) — read-only, no core logic here
 # ============================================================================
 
+# Dashboard ka "Run batch" control. Sirf ye do cheezein yaad rakhte hain:
+# batch kis "ghante" pe chala (contact-window rule ka demo) aur kab chala.
+# Batch khud har request pe fresh + deterministic banta hai, isliye results
+# store karne ki zaroorat nahi — same demo_hour = hamesha same output.
+DEMO_HOURS = {14, 21}          # 2:30 PM (window ke andar) / 9:30 PM (bahar)
+BATCH_STATE: Dict[str, Any] = {"demo_hour": 14, "ran_at": None, "runs": 0}
+
+
 def _fresh_batch():
     """
     run_batch.run() jaisa hi call — apna khud ka `:memory:` store banata hai
     (pipeline.Ctx default), durable `reclaim.db` ko kabhi chhoo ta nahi.
     Deterministic hai, isliye har call same result deta hai — parallel
     /api/metrics aur /api/cases requests kabhi disagree nahi karenge.
+    live=False hamesha: dashboard se kabhi real Razorpay call nahi hoti.
     """
-    return run_batch.run()
+    return run_batch.run(demo_hour=BATCH_STATE["demo_hour"])
+
+
+class RunBatchRequest(BaseModel):
+    demo_hour: int = 14
+
+
+@app.post("/api/run-batch")
+def api_run_batch(req: RunBatchRequest):
+    """
+    Dashboard ka "Run batch" button. Poora 54-txn synthetic batch chosen
+    ghante pe dobara chalata hai (DRY-RUN — koi paisa nahi hilta, koi message
+    nahi jaata) aur us run ke metrics lautata hai.
+    """
+    if req.demo_hour not in DEMO_HOURS:
+        raise HTTPException(status_code=422,
+                            detail=f"demo_hour must be one of {sorted(DEMO_HOURS)}")
+    BATCH_STATE["demo_hour"] = req.demo_hour
+    BATCH_STATE["ran_at"] = datetime.now().isoformat(timespec="seconds")
+    BATCH_STATE["runs"] += 1
+    results, _log = _fresh_batch()
+    return {"batch": dict(BATCH_STATE), "metrics": metrics.compute(results)}
 
 
 def _case_summary(r: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,7 +285,7 @@ def api_metrics():
     dashboard bhi inhe kabhi sum na kare.
     """
     results, _log = _fresh_batch()
-    return metrics.compute(results)
+    return {**metrics.compute(results), "batch": dict(BATCH_STATE)}
 
 
 @app.get("/api/cases")

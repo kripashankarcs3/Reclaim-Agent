@@ -87,6 +87,25 @@ def compute(results: List[Dict]) -> Dict:
     for r in results:
         by_action[r["action"]] = by_action.get(r["action"], 0) + 1
 
+    # Recovery by INTERVENTION (Playbook: "recovery by root-cause AND by
+    # intervention"). Har final action ke liye: kitne cases, unka value, aur
+    # kahan land hue. recovered aur pending yahan bhi ALAG gine jaate hain.
+    by_intervention: Dict[str, Dict] = {}
+    for r in results:
+        b = by_intervention.setdefault(r["action"] or "none", {
+            "count": 0, "value": 0, "recovered": 0, "recovered_value": 0,
+            "pending": 0, "human_review": 0,
+        })
+        b["count"] += 1
+        b["value"] += r["txn"].amount
+        if r["outcome"] == "recovered":
+            b["recovered"] += 1
+            b["recovered_value"] += r["txn"].amount
+        elif r["outcome"] == "pending":
+            b["pending"] += 1
+        elif r["outcome"] == "human_review":
+            b["human_review"] += 1
+
     exceptions = [
         {"txn": r["txn"].id, "amount": r["txn"].amount, "label": r["label"],
          "proposed": r.get("proposed_action"), "outcome": r["outcome"],
@@ -115,6 +134,7 @@ def compute(results: List[Dict]) -> Dict:
         "wrong_actions_false_positive": wrong_actions,
         "by_cause": by_cause,
         "by_action": by_action,
+        "by_intervention": by_intervention,
         "exception_list": exceptions,
     }
 

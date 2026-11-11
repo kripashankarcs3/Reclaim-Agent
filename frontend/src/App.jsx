@@ -4,7 +4,7 @@ import CaseFeed from "./components/CaseFeed.jsx";
 import CaseTimeline from "./components/CaseTimeline.jsx";
 import MetricsPanel from "./components/MetricsPanel.jsx";
 import PolicyConsole from "./components/PolicyConsole.jsx";
-import { fetchMetrics, fetchCases, fetchCase, fetchPolicyStats, fetchHealth } from "./api.js";
+import { fetchMetrics, fetchCases, fetchCase, fetchPolicyStats, fetchHealth, runBatch } from "./api.js";
 
 const POLL_MS = 6000;
 /* txn_046: the three-rule RETRY_CAP + HARD_DECLINE + AFA_THRESHOLD block —
@@ -63,6 +63,24 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchError, setBatchError] = useState(null);
+
+  const handleRunBatch = useCallback(async (demoHour) => {
+    setBatchRunning(true);
+    setBatchError(null);
+    try {
+      await runBatch(demoHour);
+      // Naye run ke hisaab se sab panels + khula hua case dobara lao.
+      await refreshLists();
+      selectCase(selectedId);
+    } catch (err) {
+      setBatchError(err.message);
+    } finally {
+      setBatchRunning(false);
+    }
+  }, [refreshLists, selectCase, selectedId]);
+
   const liveCases = cases.filter((c) => c.source === "live");
   const lastLiveCase = liveCases.length ? liveCases[liveCases.length - 1] : null;
 
@@ -75,7 +93,13 @@ export default function App() {
       <main className="app-grid">
         <CaseFeed cases={cases} selectedId={selectedId} onSelect={selectCase} />
         <CaseTimeline caseData={caseData} loading={caseLoading} error={caseError} />
-        <MetricsPanel metrics={metrics} />
+        <MetricsPanel
+          metrics={metrics}
+          onSelectCase={selectCase}
+          onRunBatch={handleRunBatch}
+          batchRunning={batchRunning}
+          batchError={batchError}
+        />
       </main>
       <PolicyConsole rules={policyStats} />
     </div>
