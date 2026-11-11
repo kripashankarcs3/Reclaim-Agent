@@ -52,10 +52,14 @@ This keeps compliance logic in code instead of relying on an LLM prompt.
 ## Quick start
 
 The default demo is completely offline. No Razorpay credentials or network access are required.
+All Python code lives in `backend/`, so run commands from there:
 
 ```bash
+cd backend
 python run_batch.py
 ```
+
+To run the API and the dashboard together on Windows, use `start.bat` (or `start.ps1`) from the repository root.
 
 Useful demo commands:
 
@@ -346,20 +350,27 @@ This matters because creating a payment link and contacting the customer are dif
 
 ```text
 .
-├── agent.py
-├── audit.py
-├── config.py
-├── decider.py
-├── diagnoser.py
-├── detector.py
-├── executor.py
-├── metrics.py
-├── notifications.py
-├── pipeline.py
-├── policy_engine.py
-├── run_batch.py
-├── store.py
-└── main.py
+├── backend/              # all Python code (run commands from here)
+│   ├── agent.py
+│   ├── audit.py
+│   ├── config.py
+│   ├── decider.py
+│   ├── diagnoser.py
+│   ├── executor.py
+│   ├── fire_webhook.py
+│   ├── main.py
+│   ├── metrics.py
+│   ├── models.py
+│   ├── notifications.py
+│   ├── pipeline.py
+│   ├── policy_engine.py
+│   ├── run_batch.py
+│   ├── seed.py
+│   ├── store.py
+│   └── requirements.txt
+├── frontend/             # React dashboard (Vite)
+├── start.bat / start.ps1 # start backend + dashboard fresh
+└── vercel.json
 ```
 
 ---

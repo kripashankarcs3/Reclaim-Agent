@@ -50,7 +50,9 @@ from models import Transaction
 # bhool jati thi kyunki AuditLog() ek plain in-memory Python list thi.
 # Vercel functions can only write to /tmp (data there resets on cold start;
 # the store re-seeds itself from seed.py on first touch).
-DB_PATH = os.getenv("RECLAIM_DB") or ("/tmp/reclaim.db" if os.getenv("VERCEL") else "reclaim.db")
+# Local DB hamesha backend/ folder ke andar — chahe server kisi bhi folder se chalaya jaaye.
+_LOCAL_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reclaim.db")
+DB_PATH = os.getenv("RECLAIM_DB") or ("/tmp/reclaim.db" if os.getenv("VERCEL") else _LOCAL_DB)
 STORE = store_mod.Store(DB_PATH)
 AUDIT = AuditLog(store=STORE)
 CTX = pipeline.Ctx(log=AUDIT, now=datetime.now(), store=STORE)

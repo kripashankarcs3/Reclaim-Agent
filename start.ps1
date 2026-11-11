@@ -16,13 +16,17 @@ foreach ($port in 8000, 5173) {
     $conns = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
     foreach ($procId in ($conns.OwningProcess | Sort-Object -Unique)) {
         Write-Host "Port $port pe purana process (pid $procId) band kar raha hoon..."
+        # uvicorn --reload ka worker child process bhi band karo, warna wo
+        # reclaim.db ko pakde rehta hai.
+        Get-CimInstance Win32_Process -Filter "ParentProcessId=$procId" |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
     }
 }
 Start-Sleep -Seconds 1
 
 Write-Host "Backend start: http://127.0.0.1:8000"
-Start-Process powershell -WorkingDirectory $root -ArgumentList @(
+Start-Process powershell -WorkingDirectory (Join-Path $root 'backend') -ArgumentList @(
     '-NoExit', '-Command', 'python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload'
 )
 
