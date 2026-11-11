@@ -48,7 +48,9 @@ from models import Transaction
 # Phase 6.5: AUDIT ab isi STORE se backed hai (AuditLog(store=STORE)), isliye
 # audit TIMELINES bhi restart ke baad zinda rehti hain — pehle ye poori tarah
 # bhool jati thi kyunki AuditLog() ek plain in-memory Python list thi.
-DB_PATH = os.getenv("RECLAIM_DB", "reclaim.db")
+# Vercel functions can only write to /tmp (data there resets on cold start;
+# the store re-seeds itself from seed.py on first touch).
+DB_PATH = os.getenv("RECLAIM_DB") or ("/tmp/reclaim.db" if os.getenv("VERCEL") else "reclaim.db")
 STORE = store_mod.Store(DB_PATH)
 AUDIT = AuditLog(store=STORE)
 CTX = pipeline.Ctx(log=AUDIT, now=datetime.now(), store=STORE)

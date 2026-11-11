@@ -4,7 +4,9 @@ api.js — thin fetch wrappers over the FastAPI dashboard endpoints.
 READ-ONLY: har function ek GET hai. Ye file kabhi POST/PUT/DELETE nahi karti
 — dashboard ka poora point hai ki ye sirf DEKHTA hai, kuch badalta nahi.
 */
-const BASE = "http://127.0.0.1:8000";
+// Local dev talks to uvicorn on :8000; in production (Vercel) the API is
+// served from the same origin, so relative /api paths are used.
+const BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://127.0.0.1:8000" : "");
 
 async function getJSON(path) {
   const res = await fetch(`${BASE}${path}`);
