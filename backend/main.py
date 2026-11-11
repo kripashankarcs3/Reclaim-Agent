@@ -55,7 +55,7 @@ Baad mein ngrok se expose karke Razorpay dashboard -> Webhooks (Test mode).
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -196,7 +196,8 @@ def api_run_batch(req: RunBatchRequest):
         raise HTTPException(status_code=422,
                             detail=f"demo_hour must be one of {sorted(DEMO_HOURS)}")
     BATCH_STATE["demo_hour"] = req.demo_hour
-    BATCH_STATE["ran_at"] = datetime.now().isoformat(timespec="seconds")
+    # UTC + offset, taaki browser ise sahi local time mein dikhaye (Vercel UTC pe chalta hai).
+    BATCH_STATE["ran_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     BATCH_STATE["runs"] += 1
     results, _log = _fresh_batch()
     return {"batch": dict(BATCH_STATE), "metrics": metrics.compute(results)}
