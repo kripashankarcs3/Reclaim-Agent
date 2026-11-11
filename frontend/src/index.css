@@ -344,7 +344,21 @@ button { font: inherit; color: inherit; }
 .magnitude-bar { height: 5px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
 .magnitude-bar__fill { height: 100%; background: linear-gradient(90deg, var(--seq-500), var(--seq-300)); border-radius: 999px; }
 
+/* Chhoti screens (ya browser zoom 125%+): fixed 100vh "dashboard" layout band karo.
+   Pehle yahan grid 1 column ho jata tha par shell 100vh + overflow:hidden pe atka
+   rehta tha, aur policy console shrink nahi hota — teeno panels ~0 height pe
+   collapse ho jate the (sirf ek patli line dikhti thi). Ab page normal scroll
+   karta hai aur har panel ko apni height milti hai. */
 @media (max-width: 1280px) {
-  .app-grid { grid-template-columns: 1fr; }
-  .policy-grid { grid-template-columns: repeat(2, 1fr); }
+  .app-shell { height: auto; min-height: 100vh; overflow: visible; }
+  .app-grid { grid-template-columns: 280px minmax(0, 1fr); flex: none; }
+  .case-feed, .timeline-panel { height: max(480px, 75vh); }
+  .metrics-panel { grid-column: 1 / -1; overflow: visible; }
+  .policy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .app-grid { grid-template-columns: minmax(0, 1fr); }
+  .case-feed { height: max(360px, 50vh); }
+  .policy-grid { grid-template-columns: minmax(0, 1fr); }
 }
